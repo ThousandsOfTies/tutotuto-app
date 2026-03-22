@@ -227,6 +227,16 @@
       console.warn('⚠️ snsLinksJsonが空です');
     }
 
+    // SNS id → ブランドカラー（URLからSVGを除去したためローカルで管理）
+    const SNS_COLORS = {
+      'youtube': '#FF0000', 'x': '#000000', 'instagram': '#E4405F',
+      'tiktok': '#000000', 'facebook': '#1877F2', 'line': '#00C300',
+      'discord': '#5865F2', 'twitch': '#9146FF', 'reddit': '#FF4500',
+      'github': '#181717', 'note': '#41C9B4', 'zenn': '#3EA8FF',
+      'qiita': '#55C500', 'niconico': '#252525', 'pixiv': '#0096FA',
+      'amazon': '#FF9900',
+    };
+
     // SNS選択画面を構築
     const snsGrid = document.getElementById('snsGrid');
     console.log('🎨 SNS選択画面を構築中:', { snsLinksCount: snsLinks.length, snsGrid });
@@ -236,10 +246,9 @@
       const button = document.createElement('button');
       button.className = 'sns-button';
 
-      // SVGがある場合はSVGアイコンを使用、なければ絵文字にフォールバック
-      const iconHtml = link.svg
-        ? `<div class="sns-icon" style="color: ${link.color}; fill: ${link.color};">${link.svg}</div>`
-        : `<div class="sns-icon">${link.icon || '🌐'}</div>`;
+      // idからブランドカラーを取得、アイコンは絵文字を使用
+      const color = SNS_COLORS[link.id] || '#666';
+      const iconHtml = `<div class="sns-icon" style="color: ${color}; font-size: 2rem;">${link.icon || '🌐'}</div>`;
 
       button.innerHTML = `
         ${iconHtml}

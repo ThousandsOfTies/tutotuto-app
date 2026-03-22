@@ -150,16 +150,13 @@ const GradingResult = ({ result, onClose, snsLinks = [], timeLimitMinutes = 30, 
 
   // SNS選択画面（警告ページ）を開く
   const openSNSSelectionPage = () => {
-    // SNSリンク情報をJSON形式でURLパラメータに渡す（SVGとカラー情報も含む）
+    // SNSリンク情報をJSON形式でURLパラメータに渡す（idのみ、SVGはmanage.html側で取得）
     const snsLinksJson = JSON.stringify(snsLinks.map(link => {
-      const snsIcon = getSNSIcon(link.id)
       return {
         id: link.id,
         name: link.name,
         url: link.url.startsWith('http://') || link.url.startsWith('https://') ? link.url : 'https://' + link.url,
         icon: link.icon, // 絵文字（フォールバック用）
-        svg: snsIcon?.svg || null, // SVGデータ
-        color: snsIcon?.color || '#666' // ブランドカラー
       }
     }))
 
