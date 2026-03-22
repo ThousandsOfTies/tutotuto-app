@@ -1,4 +1,0 @@
-User-agent: *
-Allow: /
-
-Sitemap: https://thousandsofties.github.io/HomeTeacher/sitemap.xml
