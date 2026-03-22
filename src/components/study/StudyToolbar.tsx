@@ -189,9 +189,10 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
 
                     {/* 採点ボタン */}
                     <button
-                        onClick={startGrading}
+                        onClick={isSelectionMode ? cancelSelection : startGrading}
+                        className={isSelectionMode ? 'active' : ''}
                         disabled={isGrading}
-                        title={t('gradingConfirmation.gradeBySelection')}
+                        title={isSelectionMode ? t('gradingConfirmation.cancel') : t('gradingConfirmation.gradeBySelection')}
                     >
                         {isGrading ? '⏳' : '✅'}
                     </button>

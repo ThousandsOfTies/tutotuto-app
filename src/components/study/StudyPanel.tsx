@@ -1016,7 +1016,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
           }}
           isSelectionMode={isSelectionMode}
           isGrading={isGrading}
-          startGrading={gradeDirectly}
+          startGrading={startGrading}
           cancelSelection={handleCancelSelection}
           isTextMode={isTextMode}
           toggleTextMode={toggleTextMode}
