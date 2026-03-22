@@ -746,6 +746,26 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
     addStatusMessage('📐 採点範囲を選択してください')
   }
 
+  // チェックボタン：現在の表示エリア全体をキャプチャして採点確認ダイアログへ
+  const gradeDirectly = async () => {
+    if (!containerRef.current) return
+    const rect = containerRef.current.getBoundingClientRect()
+    const fullRect = { x: 0, y: 0, width: rect.width, height: rect.height }
+    addStatusMessage('📸 ページをキャプチャ中...')
+    try {
+      const capturedImage = await captureSelectionArea(fullRect)
+      if (capturedImage) {
+        setSelectionRect(fullRect)
+        setSelectionPreview(capturedImage)
+      } else {
+        addStatusMessage('❌ 画像のキャプチャに失敗しました')
+      }
+    } catch (error) {
+      console.error('Capture error:', error)
+      addStatusMessage('❌ エラーが発生しました')
+    }
+  }
+
   // テキストモードのトグル
   const toggleTextMode = () => {
     if (!isTextMode) {
@@ -996,7 +1016,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
           }}
           isSelectionMode={isSelectionMode}
           isGrading={isGrading}
-          startGrading={startGrading}
+          startGrading={gradeDirectly}
           cancelSelection={handleCancelSelection}
           isTextMode={isTextMode}
           toggleTextMode={toggleTextMode}
