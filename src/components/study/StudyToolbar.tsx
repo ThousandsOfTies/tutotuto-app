@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ICON_SVG } from '../../constants/icons';
+import { FiEdit2 } from 'react-icons/fi';
+import { BiEraser } from 'react-icons/bi';
 
 export type TextDirection = 'horizontal' | 'vertical-rl' | 'vertical-lr';
 
@@ -255,7 +257,7 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
                             className={isDrawingMode ? 'active' : ''}
                             title={isDrawingMode ? 'ペンモード ON（クリックで設定）' : 'ペンモード OFF'}
                         >
-                            {ICON_SVG.pen(isDrawingMode, penColor)}
+                            <FiEdit2 size={20} color={isDrawingMode ? penColor : 'currentColor'} />
                         </button>
 
                         {/* ペン設定ポップアップ */}
@@ -293,7 +295,7 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
                             className={isEraserMode ? 'active' : ''}
                             title={isEraserMode ? '消しゴムモード ON（クリックで設定）' : '消しゴムモード OFF'}
                         >
-                            {ICON_SVG.eraser(isEraserMode)}
+                            <BiEraser size={20} />
                         </button>
 
                         {/* 消しゴム設定ポップアップ */}
