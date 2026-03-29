@@ -41,10 +41,6 @@ interface StudyToolbarProps {
     eraserSize: number;
     setEraserSize: (size: number) => void;
 
-    // Actions
-    onUndo: () => void;
-    onClear: () => void;
-    onClearAll: () => void;
 }
 
 export const StudyToolbar: React.FC<StudyToolbarProps> = ({
@@ -73,9 +69,6 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
     toggleEraserMode,
     eraserSize,
     setEraserSize,
-    onUndo,
-    onClear,
-    onClearAll
 }) => {
     const { t } = useTranslation();
 
@@ -316,25 +309,6 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
                             </div>
                         )}
                     </div>
-
-                    <div className="divider"></div>
-
-                    <button
-                        onClick={onUndo}
-                        title="元に戻す (Ctrl+Z)"
-                    >
-                        ↩️
-                    </button>
-                    <button
-                        onClick={onClear}
-                        onDoubleClick={onClearAll}
-                        title="クリア（ダブルクリックで全ページクリア）"
-                    >
-                        <svg width="20" height="24" viewBox="0 0 20 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <rect x="1" y="1" width="18" height="22" rx="2" fill="white" stroke="#999" strokeWidth="0.8" />
-                            <path d="M16 3 L12 7 L16 11 L20 7 Z" fill="yellow" stroke="orange" strokeWidth="0.8" transform="translate(-2, -1)" />
-                        </svg>
-                    </button>
 
                 </>
             </div>

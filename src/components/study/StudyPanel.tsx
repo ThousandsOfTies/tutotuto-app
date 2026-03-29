@@ -1034,9 +1034,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
           toggleEraserMode={toggleEraserMode}
           eraserSize={eraserSize}
           setEraserSize={setEraserSize}
-          onUndo={handleUndo}
-          onClear={clearDrawing}
-          onClearAll={clearAllDrawings}
         />
 
         <div
