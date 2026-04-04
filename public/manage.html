@@ -214,17 +214,22 @@
     document.getElementById('timeLimit').textContent = `制限時間: ${timeLimitMinutes}分`;
 
     // SNSリンクをパース
-    let snsLinks = [];
-    if (snsLinksJson) {
-      try {
-        snsLinks = JSON.parse(snsLinksJson);
-        console.log('✅ SNSリンクのパース成功:', snsLinks);
-      } catch (error) {
-        console.error('❌ SNSリンクのパースに失敗:', error);
-        console.error('生のJSONデータ:', snsLinksJson);
-      }
-    } else {
-      console.warn('⚠️ snsLinksJsonが空です');
+    const SNS_LINKS_STORE_NAME = 'snsLinks';
+
+    // SNSリンクを読み込む関数
+    async function loadSNSLinksFromDB() {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+        try {
+          const transaction = db.transaction([SNS_LINKS_STORE_NAME], 'readonly');
+          const objectStore = transaction.objectStore(SNS_LINKS_STORE_NAME);
+          const request = objectStore.getAll();
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        } catch (e) {
+          reject(e);
+        }
+      });
     }
 
     // SNS id → ブランドカラー（URLからSVGを除去したためローカルで管理）
@@ -237,32 +242,55 @@
       'amazon': '#FF9900',
     };
 
-    // SNS選択画面を構築
-    const snsGrid = document.getElementById('snsGrid');
-    console.log('🎨 SNS選択画面を構築中:', { snsLinksCount: snsLinks.length, snsGrid });
+    let snsLinks = [];
+    async function initSNSLinks() {
+      // 1. URLパラメータから試行
+      if (snsLinksJson) {
+        try {
+          snsLinks = JSON.parse(snsLinksJson);
+          console.log('✅ URLパラメータからSNSリンクをパース成功:', snsLinks);
+        } catch (error) {
+          console.error('❌ URLパラメータのパース失敗:', error);
+        }
+      }
 
-    snsLinks.forEach((link, index) => {
-      console.log(`  📌 SNS ${index + 1}:`, link);
-      const button = document.createElement('button');
-      button.className = 'sns-button';
+      // 2. パラメータにない、またはパース失敗した場合はDBから取得
+      if (snsLinks.length === 0) {
+        try {
+          console.log('🔍 DBからSNSリンクをロード中...');
+          snsLinks = await loadSNSLinksFromDB();
+          console.log('✅ DBからSNSリンクをロード成功:', snsLinks);
+        } catch (error) {
+          console.error('❌ DBからのロード失敗:', error);
+        }
+      }
 
-      // idからブランドカラーを取得、アイコンは絵文字を使用
-      const color = SNS_COLORS[link.id] || '#666';
-      const iconHtml = `<div class="sns-icon" style="color: ${color}; font-size: 2rem;">${link.icon || '🌐'}</div>`;
+      // SNSボタンを表示
+      renderSNSButtons();
+    }
 
-      button.innerHTML = `
-        ${iconHtml}
-        <div class="sns-button-name">${link.name}</div>
-      `;
-
-      button.addEventListener('click', () => {
-        startCountdownForSNS(link);
+    function renderSNSButtons() {
+      snsGrid.innerHTML = ''; // クリア
+      snsLinks.forEach((link, index) => {
+        const button = document.createElement('button');
+        button.className = 'sns-button';
+        const color = SNS_COLORS[link.id] || '#666';
+        const iconHtml = `<div class="sns-icon" style="color: ${color}; font-size: 2rem;">${link.icon || '🌐'}</div>`;
+        button.innerHTML = `
+          ${iconHtml}
+          <div class="sns-button-name">${link.name}</div>
+        `;
+        button.addEventListener('click', () => {
+          startCountdownForSNS(link);
+        });
+        snsGrid.appendChild(button);
       });
+      console.log('✅ SNSボタン生成完了:', snsLinks.length);
+    }
 
-      snsGrid.appendChild(button);
-    });
-
-    console.log('✅ SNSボタン生成完了:', snsGrid.children.length);
+    // 初期化実行
+    const snsGrid = document.getElementById('snsGrid');
+    initSNSLinks();
 
     // SNSを選択したらカウントダウン開始
     function startCountdownForSNS(snsLink) {

@@ -21,17 +21,9 @@ const GradingResult = ({ result, snsLinks = [], timeLimitMinutes = 30, modelName
   ) || []
 
   const openSNSSelectionPage = () => {
-    const snsLinksJson = JSON.stringify(snsLinks.map(link => {
-      return {
-        id: link.id,
-        name: link.name,
-        url: link.url.startsWith('http://') || link.url.startsWith('https://') ? link.url : 'https://' + link.url,
-        icon: link.icon
-      }
-    }))
     const baseUrl = `${window.location.origin}${import.meta.env.BASE_URL || '/'}`
-    const returnUrl = pdfId ? `${baseUrl}?pdfId=${encodeURIComponent(pdfId)}` : baseUrl
-    const manageUrl = `${baseUrl}manage.html?time=${timeLimitMinutes}&snsLinks=${encodeURIComponent(snsLinksJson)}&returnUrl=${encodeURIComponent(returnUrl)}`
+    const returnUrlString = pdfId ? `${baseUrl}?pdfId=${encodeURIComponent(pdfId)}` : baseUrl
+    const manageUrl = `${baseUrl}manage.html?time=${timeLimitMinutes}&returnUrl=${encodeURIComponent(returnUrlString)}`
     window.location.replace(manageUrl)
   }
 
