@@ -21,9 +21,8 @@ const GradingResult = ({ result, snsLinks = [], timeLimitMinutes = 30, modelName
   ) || []
 
   const openSNSSelectionPage = () => {
-    const baseUrl = `${window.location.origin}${import.meta.env.BASE_URL || '/'}`
-    const returnUrlString = pdfId ? `${baseUrl}?pdfId=${encodeURIComponent(pdfId)}` : baseUrl
-    const manageUrl = `${baseUrl}manage.html?returnUrl=${encodeURIComponent(returnUrlString)}`
+    const returnUrlString = pdfId ? `./?pdfId=${encodeURIComponent(pdfId)}` : './'
+    const manageUrl = `manage.html?returnUrl=${encodeURIComponent(returnUrlString)}`
     window.location.replace(manageUrl)
   }
 
