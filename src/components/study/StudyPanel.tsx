@@ -1,15 +1,14 @@
-﻿
+
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
-import { FaCheck, FaTimes } from 'react-icons/fa'
 import { useTranslation } from 'react-i18next'
-import { GradingResult as GradingResultType, GradingResponseResult, getAvailableModels, ModelInfo } from '@home-teacher/common/services/api'
+import { GradingResponseResult, getAvailableModels, ModelInfo } from '@home-teacher/common/services/api'
 import GradingResult from './GradingResult'
-import { savePDFRecord, getPDFRecord, updatePDFRecord, getAllSNSLinks, SNSLinkRecord, PDFFileRecord, saveGradingHistory, getGradingHistoryByPdfId, generateGradingHistoryId, getAppSettings, saveAppSettings, saveDrawing, saveTextAnnotation } from '@home-teacher/common/utils/indexedDB'
+import AnswerPanel, { AnswerPanelHandle } from './AnswerPanel'
+import { savePDFRecord, getPDFRecord, updatePDFRecord, getAllSNSLinks, SNSLinkRecord, PDFFileRecord, saveGradingHistory, generateGradingHistoryId, saveDrawing, saveTextAnnotation } from '@home-teacher/common/utils/indexedDB'
 import { ICON_SVG } from '../../constants/icons'
 import { DrawingPath } from '@thousands-of-ties/drawing-common'
-import PDFCanvas from '@home-teacher/common/components/study/components/PDFCanvas'
 import { PDFPane, PDFPaneHandle } from '@home-teacher/common/components/study/PDFPane'
-import { StudyToolbar } from './StudyToolbar'
+import { StudyToolbar, BreadcrumbItem } from './StudyToolbar'
 import { usePDFRenderer } from '@home-teacher/common/hooks/pdf/usePDFRenderer'
 import './StudyPanel.css'
 import { useGrading } from '../../hooks/study/useGrading'
@@ -34,12 +33,23 @@ interface StudyPanelProps {
   onBack?: () => void
 }
 
+type PanelData =
+  | { type: 'pdf' }
+  | { type: 'answer'; questionImage: string; source?: 'grading' }
+  | { type: 'grading'; result: GradingResponseResult; modelName: string | null; responseTime: number | null }
+
 const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
   const { t, i18n } = useTranslation()
   // Refs
   const paneARef = useRef<PDFPaneHandle>(null)
   const paneBRef = useRef<PDFPaneHandle>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const answerPanelRef = useRef<AnswerPanelHandle>(null)
+  const gradingPanelRef = useRef<HTMLDivElement>(null)
+  const isGradingCapturingRef = useRef(false)
+  const gradingCaptureStartRef = useRef<{ x: number; y: number } | null>(null)
+  const [gradingCaptureRect, setGradingCaptureRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
+  const [isGradingCaptureMode, setIsGradingCaptureMode] = useState(false)
 
   // --- Consolidated State & Logic ---
 
@@ -97,8 +107,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
 
   // Grading State (Additional)
   const [gradingError, setGradingError] = useState<string | null>(null)
-  const [gradingModelName, setGradingModelName] = useState<string | null>(null)
-  const [gradingResponseTime, setGradingResponseTime] = useState<number | null>(null)
 
   // AI Model State
   const [selectedModel, setSelectedModel] = useState<string>('default')
@@ -227,12 +235,8 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
   const {
     isGrading,
     setIsGrading,
-    gradingResult,
-    setGradingResult,
     selectionPreview,
     setSelectionPreview,
-    executeGrading,
-    clearGradingResult
   } = useGrading(
     pdfId,
     (msg) => addStatusMessage(msg),
@@ -240,6 +244,26 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
     pdfRecord?.fileName || 'Unknown',
     pdfRecord?.subjectId  // Pass subject ID for subject-specific grading
   )
+
+  // Panel stack state
+  const [panelStack, setPanelStack] = useState<PanelData[]>([{ type: 'pdf' }])
+  const [activePanelIndex, setActivePanelIndex] = useState(0)
+
+  // canUndo state for answer panel (managed reactively via callback)
+  const [canUndoAnswer, setCanUndoAnswer] = useState(false)
+
+  const getPanelLabel = (panel: PanelData): string => {
+    switch (panel.type) {
+      case 'pdf': return 'PDF'
+      case 'answer': return panel.source === 'grading' ? '質問記入' : '解答記入'
+      case 'grading': return '採点結果'
+    }
+  }
+
+  const pushPanel = (panel: PanelData) => {
+    setPanelStack(prev => [...prev.slice(0, activePanelIndex + 1), panel])
+    setActivePanelIndex(prev => prev + 1)
+  }
 
   const handleSelectionStart = (e: React.MouseEvent) => {
     // Only left click
@@ -452,7 +476,9 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
     try {
       const capturedImage = await captureSelectionArea(selectionRect)
       if (capturedImage) {
-        setSelectionPreview(capturedImage)
+        pushPanel({ type: 'answer', questionImage: capturedImage })
+        setIsSelectionMode(false)
+        setSelectionRect(null)
       } else {
         addStatusMessage("❌ 画像のキャプチャに失敗しました")
         setSelectionRect(null)
@@ -462,6 +488,97 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       addStatusMessage("❌ エラーが発生しました")
       setSelectionRect(null)
     }
+  }
+
+  // 採点結果パネル用の範囲選択ハンドラ
+  const handleGradingCaptureStart = (e: React.MouseEvent) => {
+    if (e.button !== 0) return
+    const rect = gradingPanelRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    isGradingCapturingRef.current = true
+    gradingCaptureStartRef.current = { x, y }
+    setGradingCaptureRect({ x, y, width: 0, height: 0 })
+  }
+
+  const handleGradingCaptureMove = (e: React.MouseEvent) => {
+    if (!isGradingCapturingRef.current || !gradingCaptureStartRef.current || !gradingPanelRef.current) return
+    const rect = gradingPanelRef.current.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    const sx = gradingCaptureStartRef.current.x
+    const sy = gradingCaptureStartRef.current.y
+    setGradingCaptureRect({
+      x: Math.min(sx, x),
+      y: Math.min(sy, y),
+      width: Math.abs(x - sx),
+      height: Math.abs(y - sy)
+    })
+  }
+
+  const handleGradingCaptureEnd = async () => {
+    if (!isGradingCapturingRef.current || !gradingCaptureRect || !gradingPanelRef.current) return
+    isGradingCapturingRef.current = false
+
+    if (gradingCaptureRect.width < 10 || gradingCaptureRect.height < 10) {
+      setGradingCaptureRect(null)
+      return
+    }
+
+    try {
+      const html2canvas = (await import('html2canvas')).default
+      const panel = gradingPanelRef.current
+      // スクロールオフセットを取得
+      const scrollEl = panel.querySelector('.grading-result-content') as HTMLElement | null
+      const scrollTop = scrollEl?.scrollTop ?? 0
+
+      // オーバーレイ（枠線）を非表示にしてからキャプチャ
+      const overlay = panel.querySelector('.grading-capture-overlay') as HTMLElement | null
+      if (overlay) overlay.style.display = 'none'
+
+      const fullCanvas = await html2canvas(panel, {
+        scale: window.devicePixelRatio || 2,
+        useCORS: true,
+        allowTaint: true,
+        scrollY: -scrollTop,
+        y: scrollTop,
+        height: panel.clientHeight,
+      })
+
+      if (overlay) overlay.style.display = ''
+
+      const dpr = window.devicePixelRatio || 2
+      const cropCanvas = document.createElement('canvas')
+      cropCanvas.width = gradingCaptureRect.width * dpr
+      cropCanvas.height = gradingCaptureRect.height * dpr
+      const ctx = cropCanvas.getContext('2d')!
+      ctx.drawImage(
+        fullCanvas,
+        gradingCaptureRect.x * dpr,
+        gradingCaptureRect.y * dpr,
+        cropCanvas.width,
+        cropCanvas.height,
+        0, 0,
+        cropCanvas.width,
+        cropCanvas.height
+      )
+
+      const capturedImage = cropCanvas.toDataURL('image/png')
+      pushPanel({ type: 'answer', questionImage: capturedImage, source: 'grading' })
+      setIsGradingCaptureMode(false)
+      setGradingCaptureRect(null)
+    } catch (error) {
+      console.error('Grading capture error:', error)
+      addStatusMessage('❌ キャプチャに失敗しました')
+      setGradingCaptureRect(null)
+    }
+  }
+
+  const cancelGradingCapture = () => {
+    setIsGradingCaptureMode(false)
+    setGradingCaptureRect(null)
+    isGradingCapturingRef.current = false
   }
 
   const captureSelectionArea = async (rect: { x: number, y: number, width: number, height: number }) => {
@@ -527,13 +644,11 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
 
   // パス追加ハンドラ
   const handlePathAdd = (page: number, newPath: DrawingPath) => {
-    // console.log('📝 handlePathAdd called', { page, newPathPoints: newPath.points.length })
     setDrawingPaths(prev => {
       const newMap = new Map(prev)
       const currentPaths = newMap.get(page) || []
       const newPaths = [...currentPaths, newPath]
       newMap.set(page, newPaths)
-      // console.log('📝 handlePathAdd state update', { page, totalPaths: newPaths.length })
 
       // Save to DB
       saveDrawing(pdfId, page, JSON.stringify(newPaths))
@@ -561,8 +676,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
 
   // パス変更ハンドラ（Undo/Redo/Eraserなど）
   const handlePathsChange = (page: number, newPaths: DrawingPath[]) => {
-    // console.log('⚠️ handlePathsChange called', { page, newPathsLength: newPaths.length })
-    // console.trace('handlePathsChange call stack')
     setDrawingPaths(prev => {
       const newMap = new Map(prev)
       if (newPaths.length === 0) {
@@ -576,15 +689,12 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
   }
 
   // 採点確定ハンドラ
-  const confirmAndGrade = async () => {
-    if (!selectionRect || !selectionPreview) return
-
+  const confirmAndGrade = async (compositeImage: string) => {
     setIsGrading(true)
     setGradingError(null)
 
     try {
-      // 切り抜き画像のみ使用（簡素化）
-      const croppedImageData = selectionPreview
+      const croppedImageData = compositeImage
 
       // Validate image size (minimum 50x50)
       const img = new Image()
@@ -617,12 +727,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       )
       const endTime = Date.now()
       const clientResponseTimeSeconds = parseFloat(((endTime - startTime) / 1000).toFixed(1))
-      // サーバーからの計測時間があればそれを使用、なければクライアント側計測時間を使用
-      setGradingResponseTime(response.responseTime ?? clientResponseTimeSeconds)
-      // サーバーから返されたモデル名を設定
-      if (response.modelName) {
-        setGradingModelName(response.modelName)
-      }
 
       if (!response.success) {
         setGradingError(response.error || "採点に失敗しました")
@@ -639,7 +743,12 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
         problems = numericKeys.map(k => nested[k])
       }
 
-      setGradingResult({ ...response.result, problems })
+      pushPanel({
+        type: 'grading',
+        result: { ...response.result, problems },
+        modelName: response.modelName ?? null,
+        responseTime: response.responseTime ?? clientResponseTimeSeconds
+      })
       addStatusMessage(`✅ 採点完了(${problems.length}問)`)
 
       // 採点履歴を保存
@@ -669,9 +778,13 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       setGradingError(e instanceof Error ? e.message : String(e))
     } finally {
       setIsGrading(false)
-      setSelectionPreview(null)
-      setSelectionRect(null)
     }
+  }
+
+  // Grade handler called from toolbar
+  const handleGradeFromToolbar = async () => {
+    const compositeImage = await answerPanelRef.current?.getCompositeImage()
+    if (compositeImage) await confirmAndGrade(compositeImage)
   }
 
   // プレビューのキャンセル
@@ -737,33 +850,25 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
 
   // 採点開始（範囲選択モードに切り替え）
   const startGrading = () => {
-    addStatusMessage('📱 採点モード開始')
+    const currentPanel = panelStack[activePanelIndex]
+    if (currentPanel?.type === 'grading') {
+      // 採点結果パネル上での範囲選択（html2canvasでキャプチャ）
+      setIsGradingCaptureMode(true)
+      setGradingCaptureRect(null)
+      addStatusMessage('📐 キャプチャする範囲を選択してください')
+      return
+    }
+    // PDFパネルが表示されていない場合は先にPDFパネルへ移動
+    const pdfIndex = panelStack.findIndex(p => p.type === 'pdf')
+    if (pdfIndex >= 0 && activePanelIndex !== pdfIndex) {
+      setActivePanelIndex(pdfIndex)
+    }
     setIsSelectionMode(true)
     setIsDrawingMode(false)
     setIsEraserMode(false)
     setIsTextMode(false)
     setSelectionRect(null)
     addStatusMessage('📐 採点範囲を選択してください')
-  }
-
-  // チェックボタン：現在の表示エリア全体をキャプチャして採点確認ダイアログへ
-  const gradeDirectly = async () => {
-    if (!containerRef.current) return
-    const rect = containerRef.current.getBoundingClientRect()
-    const fullRect = { x: 0, y: 0, width: rect.width, height: rect.height }
-    addStatusMessage('📸 ページをキャプチャ中...')
-    try {
-      const capturedImage = await captureSelectionArea(fullRect)
-      if (capturedImage) {
-        setSelectionRect(fullRect)
-        setSelectionPreview(capturedImage)
-      } else {
-        addStatusMessage('❌ 画像のキャプチャに失敗しました')
-      }
-    } catch (error) {
-      console.error('Capture error:', error)
-      addStatusMessage('❌ エラーが発生しました')
-    }
   }
 
   // テキストモードのトグル
@@ -924,7 +1029,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
 
   // 矩形選択モードをキャンセル
   const handleCancelSelection = () => {
-    // setIsSelectionMode(false) // ユーザー要望によりモードを維持
     setSelectionRect(null)
     setSelectionPreview(null)
     addStatusMessage('選択をクリアしました。再度範囲を選択してください')
@@ -932,8 +1036,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
 
   // リサイズハンドラ
   const handleResizeStart = (e: React.MouseEvent | React.TouchEvent) => {
-    // preventDefault to stop scrolling while resizing
-    // e.preventDefault() // React SyntheticEvent might be passive by default in some versions, check handling
     setIsResizing(true)
   }
 
@@ -999,11 +1101,299 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
     })
   }
 
+  const activePanel = panelStack[activePanelIndex]
+  const isOnAnswerPanel = activePanel?.type === 'answer'
+
+  // PDF content panel JSX
+  const pdfContent = (
+    <div
+      className="canvas-container"
+      ref={containerRef}
+      style={{ position: 'relative', height: '100%', display: 'flex', flexDirection: 'column' }}
+    >
+      {/* Error / Loading Overlay */}
+      {(isLoading || pdfError) && (
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          alignItems: 'center',
+          backgroundColor: 'rgba(255, 255, 255, 0.9)',
+          zIndex: 20000
+        }}>
+          {isLoading ? (
+            <div style={{ textAlign: 'center' }}>
+              <div className="spinner" style={{
+                width: '40px',
+                height: '40px',
+                border: '4px solid #f3f3f3',
+                borderTop: '4px solid #3498db',
+                borderRadius: '50%',
+                animation: 'spin 1s linear infinite',
+                marginBottom: '16px',
+                margin: '0 auto'
+              }} />
+              <p>PDFを読み込み中...</p>
+              <style>{`
+                @keyframes spin {
+                  0% { transform: rotate(0deg); }
+                  100% { transform: rotate(360deg); }
+                }
+              `}</style>
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '20px' }}>
+              <p style={{ color: '#e74c3c', marginBottom: '16px', fontWeight: 'bold' }}>PDFの読み込みに失敗しました</p>
+              <p style={{ fontSize: '12px', color: '#666', marginBottom: '20px', maxWidth: '300px', wordBreak: 'break-all' }}>{pdfError}</p>
+              <button
+                onClick={() => setRetryCount(c => c + 1)}
+                style={{
+                  padding: '10px 20px',
+                  backgroundColor: '#3498db',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '16px',
+                  boxShadow: '0 2px 5px rgba(0,0,0,0.2)'
+                }}
+              >
+                再読み込み
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+      {/* Main Content Area: PDF Panes */}
+      <div
+        ref={splitContainerRef}
+        style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'row',
+          overflow: 'hidden',
+          position: 'relative',
+          backgroundColor: '#f0f0f0',
+          height: '100%'
+        }}
+      >
+        {/* Global Selection Overlay */}
+        {isSelectionMode && (
+          <div
+            className="selection-overlay"
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              zIndex: 9999,
+              cursor: isCtrlPressed ? 'grab' : 'crosshair',
+              touchAction: 'none',
+              pointerEvents: isCtrlPressed ? 'none' : 'auto'
+            }}
+            onMouseDown={handleSelectionStart}
+            onMouseMove={handleSelectionMove}
+            onMouseUp={handleSelectionEnd}
+            onTouchStart={handleTouchSelectionStart}
+            onTouchMove={handleTouchSelectionMove}
+            onTouchEnd={handleTouchSelectionEnd}
+          >
+            {selectionRect && (
+              <div style={{
+                position: 'absolute',
+                left: selectionRect.x,
+                top: selectionRect.y,
+                width: selectionRect.width,
+                height: selectionRect.height,
+                backgroundColor: 'rgba(52, 152, 219, 0.2)',
+                border: '2px solid #3498db',
+                pointerEvents: 'none'
+              }} />
+            )}
+          </div>
+        )}
+
+        {/* ペインA (問題) */}
+        {(isSplitView || activeTab === 'A') && (
+          <PDFPane
+            className="pane-a"
+            ref={paneARef}
+            style={{
+              flex: isSplitView ? `0 0 ${Math.round(splitRatio * 100)}%` : '1 1 auto',
+              height: '100%',
+              overflow: 'hidden'
+            }}
+            pdfRecord={pdfRecord}
+            pdfDoc={pdfDoc}
+            pageNum={pageA}
+            tool={isEraserMode ? 'eraser' : (isDrawingMode ? 'pen' : 'none')}
+            color={penColor}
+            size={penSize}
+            eraserSize={eraserSize}
+            drawingPaths={drawingPathsA}
+            isCtrlPressed={isCtrlPressed}
+            splitMode={isSplitView}
+            onPageChange={handlePageAChange}
+            onPathAdd={(path) => handlePathAdd(pageA, path)}
+            onPathsChange={(paths) => handlePathsChange(pageA, paths)}
+            onUndo={handleUndo}
+          />
+        )}
+
+        {/* リサイズハンドル */}
+        {isSplitView && (
+          <div
+            onMouseDown={handleResizeStart}
+            onTouchStart={handleResizeStart}
+            style={{
+              width: '6px',
+              height: '100%',
+              backgroundColor: isResizing ? '#3498db' : '#ccc',
+              cursor: 'col-resize',
+              flexShrink: 0,
+              transition: 'background-color 0.2s',
+              zIndex: 10000,
+              position: 'relative'
+            }}
+          />
+        )}
+
+        {/* ペインB (解答/解説) */}
+        {(isSplitView || activeTab === 'B') && (
+          <PDFPane
+            className="pane-b"
+            ref={paneBRef}
+            style={{
+              flex: isSplitView ? `0 0 ${Math.round((1 - splitRatio) * 100)}%` : '1 1 auto',
+              height: '100%',
+              overflow: 'hidden'
+            }}
+            pdfRecord={pdfRecord}
+            pdfDoc={pdfDoc}
+            pageNum={pageB}
+            tool={isEraserMode ? 'eraser' : (isDrawingMode ? 'pen' : 'none')}
+            color={penColor}
+            size={penSize}
+            eraserSize={eraserSize}
+            drawingPaths={drawingPaths.get(pageB) || []}
+            isCtrlPressed={isCtrlPressed}
+            splitMode={isSplitView}
+            onPageChange={handlePageBChange}
+            onPathAdd={(path) => handlePathAdd(pageB, path)}
+            onPathsChange={(paths) => handlePathsChange(pageB, paths)}
+            onUndo={handleUndo}
+          />
+        )}
+
+        {/* テキストモード用オーバーレイ */}
+        {isTextMode && !editingText && (
+          <div
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              zIndex: 100,
+              cursor: 'text',
+              touchAction: 'none',
+              pointerEvents: isCtrlPressed ? 'none' : 'auto'
+            }}
+            onClick={(e) => {
+              const rect = containerRef.current?.getBoundingClientRect()
+              if (!rect) return
+
+              const currentPage = activeTab === 'A' ? pageA : pageB
+
+              const screenX = e.clientX - rect.left
+              const screenY = e.clientY - rect.top
+              const normalizedX = screenX / rect.width
+              const normalizedY = screenY / rect.height
+
+              handleTextClick(currentPage, normalizedX, normalizedY, e.clientX, e.clientY)
+            }}
+            onTouchStart={(e) => {
+              handleOverlayTouchStart(e)
+            }}
+            onTouchMove={(e) => {
+              handleOverlayTouchMove(e)
+            }}
+            onTouchEnd={(e) => {
+              handleOverlayTouchEnd(e)
+            }}
+          />
+        )}
+
+        {/* テキストアノテーション表示 */}
+        {(textAnnotations.get(activeTab === 'A' ? pageA : pageB) || []).map((annotation) => {
+          const currentPage = activeTab === 'A' ? pageA : pageB
+          const isClickable = isEraserMode || isTextMode
+          const isBeingEdited = editingText?.existingId === annotation.id
+
+          if (isBeingEdited) return null
+
+          return (
+            <div
+              key={annotation.id}
+              style={{
+                position: 'absolute',
+                left: `${annotation.x * 100}%`,
+                top: `${annotation.y * 100}%`,
+                fontSize: `${annotation.fontSize}px`,
+                color: annotation.color,
+                writingMode: annotation.direction === 'horizontal' ? 'horizontal-tb' :
+                  annotation.direction === 'vertical-rl' ? 'vertical-rl' : 'vertical-lr',
+                whiteSpace: 'pre-wrap',
+                pointerEvents: isClickable ? 'auto' : 'none',
+                zIndex: isClickable ? 200 : 50,
+                cursor: isClickable ? 'pointer' : 'default',
+                textShadow: '1px 1px 2px rgba(255,255,255,0.8), -1px -1px 2px rgba(255,255,255,0.8)',
+                padding: isClickable ? '2px 4px' : '0',
+                borderRadius: '4px',
+                backgroundColor: isClickable ? 'rgba(200, 220, 255, 0.3)' : 'transparent',
+                border: isClickable ? '1px dashed #3498db' : 'none'
+              }}
+              onClick={(e) => {
+                if (!isClickable) return
+                e.stopPropagation()
+                const rect = containerRef.current?.getBoundingClientRect()
+                if (!rect) return
+                setEditingText({
+                  pageNum: currentPage,
+                  x: annotation.x,
+                  y: annotation.y,
+                  screenX: rect.left + annotation.x * rect.width,
+                  screenY: rect.top + annotation.y * rect.height,
+                  existingId: annotation.id,
+                  initialText: annotation.text
+                })
+              }}
+              title={isClickable ? 'クリックで編集（テキストを消して確定で削除）' : ''}
+            >
+              {annotation.text}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+
   return (
     <div className="pdf-viewer-container">
       <div className="pdf-viewer">
         <StudyToolbar
           onBack={onBack}
+          breadcrumbs={panelStack.map((panel, i) => ({
+            label: getPanelLabel(panel),
+            onClick: () => setActivePanelIndex(i),
+            isCurrent: i === activePanelIndex
+          }))}
           isSplitView={isSplitView}
           toggleSplitView={toggleSplitView}
           activeTab={activeTab}
@@ -1014,10 +1404,10 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
               setActiveTab(prev => prev === 'A' ? 'B' : 'A')
             }
           }}
-          isSelectionMode={isSelectionMode}
+          isSelectionMode={isSelectionMode || isGradingCaptureMode}
           isGrading={isGrading}
           startGrading={startGrading}
-          cancelSelection={handleCancelSelection}
+          cancelSelection={isGradingCaptureMode ? cancelGradingCapture : handleCancelSelection}
           isTextMode={isTextMode}
           toggleTextMode={toggleTextMode}
           textFontSize={textFontSize}
@@ -1034,441 +1424,158 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
           toggleEraserMode={toggleEraserMode}
           eraserSize={eraserSize}
           setEraserSize={setEraserSize}
+          onUndo={handleUndo}
+          onClear={clearDrawing}
+          onClearAll={clearAllDrawings}
+          onGrade={isOnAnswerPanel ? handleGradeFromToolbar : undefined}
+          canUndoAnswer={isOnAnswerPanel ? canUndoAnswer : undefined}
+          onUndoAnswer={isOnAnswerPanel ? () => answerPanelRef.current?.undo() : undefined}
+          onClearAnswer={isOnAnswerPanel ? () => answerPanelRef.current?.clear() : undefined}
+          selectedModel={selectedModel}
+          setSelectedModel={setSelectedModel}
+          availableModels={availableModels}
+          defaultModelName={defaultModelName}
         />
 
-        <div
-          className="canvas-container"
-          ref={containerRef}
-          style={{ position: 'relative' }} // Ensure container is relative for overlay
-        >
-          {/* Error / Loading Overlay */}
-          {(isLoading || pdfError) && (
-            <div style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: '100%',
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'center',
-              alignItems: 'center',
-              backgroundColor: 'rgba(255, 255, 255, 0.9)',
-              zIndex: 20000
-            }}>
-              {isLoading ? (
-                <div style={{ textAlign: 'center' }}>
-                  <div className="spinner" style={{
-                    width: '40px',
-                    height: '40px',
-                    border: '4px solid #f3f3f3',
-                    borderTop: '4px solid #3498db',
-                    borderRadius: '50%',
-                    animation: 'spin 1s linear infinite',
-                    marginBottom: '16px',
-                    margin: '0 auto'
-                  }} />
-                  <p>PDFを読み込み中...</p>
-                  <style>{`
-                    @keyframes spin {
-                      0% { transform: rotate(0deg); }
-                      100% { transform: rotate(360deg); }
-                    }
-                  `}</style>
-                </div>
-              ) : (
-                <div style={{ textAlign: 'center', padding: '20px' }}>
-                  <p style={{ color: '#e74c3c', marginBottom: '16px', fontWeight: 'bold' }}>PDFの読み込みに失敗しました</p>
-                  <p style={{ fontSize: '12px', color: '#666', marginBottom: '20px', maxWidth: '300px', wordBreak: 'break-all' }}>{pdfError}</p>
-                  <button
-                    onClick={() => setRetryCount(c => c + 1)}
-                    style={{
-                      padding: '10px 20px',
-                      backgroundColor: '#3498db',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '4px',
-                      cursor: 'pointer',
-                      fontSize: '16px',
-                      boxShadow: '0 2px 5px rgba(0,0,0,0.2)'
-                    }}
-                  >
-                    再読み込み
-                  </button>
+        <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
+          {panelStack.map((panel, i) => (
+            <div
+              key={i}
+              style={{
+                position: 'absolute',
+                top: 0, left: 0, width: '100%', height: '100%',
+                transform: `translateX(${(i - activePanelIndex) * 100}%)`,
+                transition: 'transform 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
+                overflow: 'hidden'
+              }}
+            >
+              {panel.type === 'pdf' && pdfContent}
+              {panel.type === 'answer' && (
+                <AnswerPanel
+                  ref={answerPanelRef}
+                  questionImage={panel.questionImage}
+                  penColor={penColor}
+                  penSize={penSize}
+                  isEraserMode={isEraserMode}
+                  eraserSize={eraserSize}
+                  onCanUndoChange={setCanUndoAnswer}
+                />
+              )}
+              {panel.type === 'grading' && (
+                <div
+                  ref={i === activePanelIndex ? gradingPanelRef : undefined}
+                  style={{ position: 'relative', width: '100%', height: '100%' }}
+                >
+                  <GradingResult
+                    result={panel.result}
+                    snsLinks={snsLinks}
+                    timeLimitMinutes={snsTimeLimit}
+                    modelName={panel.modelName}
+                    responseTime={panel.responseTime}
+                    pdfId={pdfId}
+                  />
+                  {isGradingCaptureMode && i === activePanelIndex && (
+                    <div
+                      className="grading-capture-overlay"
+                      style={{
+                        position: 'absolute',
+                        top: 0, left: 0, width: '100%', height: '100%',
+                        zIndex: 9999,
+                        cursor: 'crosshair',
+                      }}
+                      onMouseDown={handleGradingCaptureStart}
+                      onMouseMove={handleGradingCaptureMove}
+                      onMouseUp={handleGradingCaptureEnd}
+                      onMouseLeave={() => { if (isGradingCapturingRef.current) handleGradingCaptureEnd() }}
+                    >
+                      {gradingCaptureRect && (
+                        <div style={{
+                          position: 'absolute',
+                          left: gradingCaptureRect.x,
+                          top: gradingCaptureRect.y,
+                          width: gradingCaptureRect.width,
+                          height: gradingCaptureRect.height,
+                          backgroundColor: 'rgba(52, 152, 219, 0.2)',
+                          border: '2px solid #3498db',
+                          pointerEvents: 'none'
+                        }} />
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
-          )}
-          {/* Main Content Area: PDF Panes */}
-          <div
-            ref={splitContainerRef}
-            style={{
-              flex: 1,
-              display: 'flex',
-              flexDirection: 'row',
-              overflow: 'hidden',
-              position: 'relative',
-              backgroundColor: '#f0f0f0',
-              height: '100%' // Ensure full height
-            }}
-          >
-            {/* Global Selection Overlay */}
-            {isSelectionMode && (
-              <div
-                className="selection-overlay"
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  width: '100%',
-                  height: '100%',
-                  zIndex: 9999,
-                  cursor: isCtrlPressed ? 'grab' : 'crosshair',
-                  touchAction: 'none',
-                  // Ctrl押下中はPDFPaneにイベントを通過させる（2本指ジェスチャーはDOM操作で即座に切り替え）
-                  pointerEvents: isCtrlPressed ? 'none' : 'auto'
-                }}
-                onMouseDown={handleSelectionStart}
-                onMouseMove={handleSelectionMove}
-                onMouseUp={handleSelectionEnd}
-                onTouchStart={handleTouchSelectionStart}
-                onTouchMove={handleTouchSelectionMove}
-                onTouchEnd={handleTouchSelectionEnd}
-              >
-                {selectionRect && (
-                  <div style={{
-                    position: 'absolute',
-                    left: selectionRect.x,
-                    top: selectionRect.y,
-                    width: selectionRect.width,
-                    height: selectionRect.height,
-                    backgroundColor: 'rgba(52, 152, 219, 0.2)',
-                    border: '2px solid #3498db',
-                    pointerEvents: 'none'
-                  }} />
-                )}
-              </div>
-            )}
-
-            {/* ペインA (問題) */}
-            {(isSplitView || activeTab === 'A') && (
-              <PDFPane
-                className="pane-a"
-                ref={paneARef}
-                style={{
-                  flex: isSplitView ? `0 0 ${Math.round(splitRatio * 100)}%` : '1 1 auto',
-                  height: '100%',
-                  overflow: 'hidden'
-                }}
-                pdfRecord={pdfRecord}
-                pdfDoc={pdfDoc}
-                pageNum={pageA}
-                tool={isEraserMode ? 'eraser' : (isDrawingMode ? 'pen' : 'none')}
-                color={penColor}
-                size={penSize}
-                eraserSize={eraserSize}
-                drawingPaths={drawingPathsA}
-                isCtrlPressed={isCtrlPressed}
-                splitMode={isSplitView}
-                onPageChange={handlePageAChange}
-                onPathAdd={(path) => handlePathAdd(pageA, path)}
-                onPathsChange={(paths) => handlePathsChange(pageA, paths)}
-                onUndo={handleUndo}
-              />
-            )}
-
-            {/* リサイズハンドル */}
-            {
-              isSplitView && (
-                <div
-                  onMouseDown={handleResizeStart}
-                  onTouchStart={handleResizeStart}
-                  style={{
-                    width: '6px',
-                    height: '100%',
-                    backgroundColor: isResizing ? '#3498db' : '#ccc',
-                    cursor: 'col-resize',
-                    flexShrink: 0,
-                    transition: 'background-color 0.2s',
-                    zIndex: 10000,  // 選択オーバーレイ(9999)より上
-                    position: 'relative'
-                  }}
-                />
-              )
-            }
-
-            {/* ペインB (解答/解説) */}
-            {
-              (isSplitView || activeTab === 'B') && (
-                <PDFPane
-                  className="pane-b"
-                  ref={paneBRef}
-                  style={{
-                    flex: isSplitView ? `0 0 ${Math.round((1 - splitRatio) * 100)}%` : '1 1 auto',
-                    height: '100%',
-                    overflow: 'hidden'
-                  }}
-                  pdfRecord={pdfRecord}
-                  pdfDoc={pdfDoc}
-                  pageNum={pageB}
-                  tool={isEraserMode ? 'eraser' : (isDrawingMode ? 'pen' : 'none')}
-                  color={penColor}
-                  size={penSize}
-                  eraserSize={eraserSize}
-                  drawingPaths={drawingPaths.get(pageB) || []}
-                  isCtrlPressed={isCtrlPressed}
-                  splitMode={isSplitView}
-                  onPageChange={handlePageBChange}
-                  onPathAdd={(path) => handlePathAdd(pageB, path)}
-                  onPathsChange={(paths) => handlePathsChange(pageB, paths)}
-                  onUndo={handleUndo}
-                />
-              )
-            }
-
-            {/* テキストモード用オーバーレイ */}
-            {
-              isTextMode && !editingText && (
-                <div
-                  ref={(el) => {
-                    // Store ref for immediate DOM manipulation
-                    if (el) (el as any).__textOverlayRef = el
-                  }}
-                  style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    height: '100%',
-                    zIndex: 100,
-                    cursor: 'text',
-                    touchAction: 'none',
-                    // Ctrl押下中はPDFPaneにイベントを通過させる
-                    pointerEvents: isCtrlPressed ? 'none' : 'auto'
-                  }}
-                  onClick={(e) => {
-                    const rect = containerRef.current?.getBoundingClientRect()
-                    if (!rect) return
-
-                    // 現在アクティブなペインを特定
-                    const currentPage = activeTab === 'A' ? pageA : pageB
-
-                    // クリック位置を正規化座標に変換（簡易版：コンテナ基準）
-                    const screenX = e.clientX - rect.left
-                    const screenY = e.clientY - rect.top
-                    const normalizedX = screenX / rect.width
-                    const normalizedY = screenY / rect.height
-
-                    handleTextClick(currentPage, normalizedX, normalizedY, e.clientX, e.clientY)
-                  }}
-                  onTouchStart={(e) => {
-                    // 共通ヘルパーでピンチズームを処理
-                    handleOverlayTouchStart(e)
-                  }}
-                  onTouchMove={(e) => {
-                    // 共通ヘルパーでピンチズームを処理
-                    handleOverlayTouchMove(e)
-                  }}
-                  onTouchEnd={(e) => {
-                    // 共通ヘルパーでタッチ終了処理
-                    handleOverlayTouchEnd(e)
-                  }}
-                />
-              )
-            }
-
-            {/* テキストアノテーション表示 */}
-            {
-              (textAnnotations.get(activeTab === 'A' ? pageA : pageB) || []).map((annotation) => {
-                const currentPage = activeTab === 'A' ? pageA : pageB
-                const isClickable = isEraserMode || isTextMode
-                const isBeingEdited = editingText?.existingId === annotation.id
-
-                // 編集中のテキストは非表示（入力ボックスで表示）
-                if (isBeingEdited) return null
-
-                return (
-                  <div
-                    key={annotation.id}
-                    style={{
-                      position: 'absolute',
-                      left: `${annotation.x * 100}%`,
-                      top: `${annotation.y * 100}%`,
-                      fontSize: `${annotation.fontSize}px`,
-                      color: annotation.color,
-                      writingMode: annotation.direction === 'horizontal' ? 'horizontal-tb' :
-                        annotation.direction === 'vertical-rl' ? 'vertical-rl' : 'vertical-lr',
-                      whiteSpace: 'pre-wrap',
-                      pointerEvents: isClickable ? 'auto' : 'none',
-                      zIndex: isClickable ? 200 : 50,
-                      cursor: isClickable ? 'pointer' : 'default',
-                      textShadow: '1px 1px 2px rgba(255,255,255,0.8), -1px -1px 2px rgba(255,255,255,0.8)',
-                      padding: isClickable ? '2px 4px' : '0',
-                      borderRadius: '4px',
-                      backgroundColor: isClickable ? 'rgba(200, 220, 255, 0.3)' : 'transparent',
-                      border: isClickable ? '1px dashed #3498db' : 'none'
-                    }}
-                    onClick={(e) => {
-                      if (!isClickable) return
-                      e.stopPropagation()
-                      // 編集モードに入る
-                      const rect = containerRef.current?.getBoundingClientRect()
-                      if (!rect) return
-                      setEditingText({
-                        pageNum: currentPage,
-                        x: annotation.x,
-                        y: annotation.y,
-                        screenX: rect.left + annotation.x * rect.width,
-                        screenY: rect.top + annotation.y * rect.height,
-                        existingId: annotation.id,
-                        initialText: annotation.text
-                      })
-                    }}
-                    title={isClickable ? 'クリックで編集（テキストを消して確定で削除）' : ''}
-                  >
-                    {annotation.text}
-                  </div>
-                )
-              })
-            }
-          </div >
-        </div >
+          ))}
+        </div>
 
         {/* テキスト入力ボックス */}
-        {
-          editingText && (
-            <div
+        {editingText && (
+          <div
+            style={{
+              position: 'fixed',
+              left: editingText.screenX,
+              top: editingText.screenY,
+              zIndex: 10000,
+              background: 'white',
+              border: '2px solid #3498db',
+              borderRadius: '4px',
+              padding: '4px',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
+            }}
+          >
+            <textarea
+              autoFocus
+              defaultValue={editingText.initialText || ''}
+              placeholder={t('textMode.placeholder')}
               style={{
-                position: 'fixed',
-                left: editingText.screenX,
-                top: editingText.screenY,
-                zIndex: 10000,
-                background: 'white',
-                border: '2px solid #3498db',
-                borderRadius: '4px',
-                padding: '4px',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
+                fontSize: `${textFontSize}px`,
+                color: penColor,
+                writingMode: textDirection === 'horizontal' ? 'horizontal-tb' :
+                  textDirection === 'vertical-rl' ? 'vertical-rl' : 'vertical-lr',
+                border: 'none',
+                outline: 'none',
+                resize: 'both',
+                minWidth: textDirection === 'horizontal' ? '150px' : '50px',
+                minHeight: textDirection === 'horizontal' ? '50px' : '100px',
+                maxWidth: '300px',
+                maxHeight: '200px'
               }}
-            >
-              <textarea
-                autoFocus
-                defaultValue={editingText.initialText || ''}
-                placeholder={t('textMode.placeholder')}
-                style={{
-                  fontSize: `${textFontSize}px`,
-                  color: penColor,
-                  writingMode: textDirection === 'horizontal' ? 'horizontal-tb' :
-                    textDirection === 'vertical-rl' ? 'vertical-rl' : 'vertical-lr',
-                  border: 'none',
-                  outline: 'none',
-                  resize: 'both',
-                  minWidth: textDirection === 'horizontal' ? '150px' : '50px',
-                  minHeight: textDirection === 'horizontal' ? '50px' : '100px',
-                  maxWidth: '300px',
-                  maxHeight: '200px'
-                }}
-                onBlur={(e) => confirmText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') {
-                    setEditingText(null)
-                  } else if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault()
-                    confirmText((e.target as HTMLTextAreaElement).value)
-                  }
-                }}
-              />
-            </div>
-          )
-        }
-
-        {
-          gradingResult && (
-            <GradingResult
-              result={gradingResult}
-              onClose={() => setGradingResult(null)}
-              snsLinks={snsLinks}
-              timeLimitMinutes={snsTimeLimit}
-              modelName={gradingModelName}
-              responseTime={gradingResponseTime}
-              pdfId={pdfId}
+              onBlur={(e) => confirmText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  setEditingText(null)
+                } else if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  confirmText((e.target as HTMLTextAreaElement).value)
+                }
+              }}
             />
-          )
-        }
+          </div>
+        )}
 
-
-        {
-          gradingError && (
-            <div className="error-popup">
-              <div className="error-popup-content">
-                <h3>{t('gradingConfirmation.errorTitle')}</h3>
-                <p>{gradingError}</p>
-                <button onClick={() => setGradingError(null)} className="close-btn">
-                  {t('gradingConfirmation.close')}
-                </button>
-              </div>
-            </div>
-          )
-        }
-
-        {
-          selectionPreview && (
-            <div className="selection-confirm-popup">
-              <div className="selection-confirm-content">
-                <h3>{t('gradingConfirmation.title')}</h3>
-                <div className="preview-image-container">
-                  <img src={selectionPreview} alt={t('gradingConfirmation.previewAlt')} className="preview-image" />
-                </div>
-                <div style={{ marginTop: '16px', marginBottom: '16px' }}>
-                  <label style={{ fontWeight: 'bold', marginBottom: '8px', display: 'block' }}>{t('gradingConfirmation.modelLabel')}</label>
-                  <select
-                    value={selectedModel}
-                    onChange={(e) => setSelectedModel(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '8px',
-                      borderRadius: '4px',
-                      border: '1px solid #ccc',
-                      fontSize: '14px',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <option value="default">{t('gradingConfirmation.defaultModel')} ({defaultModelName})</option>
-                    {availableModels.map(model => (
-                      <option key={model.id} value={model.id}>
-                        {model.name}
-                      </option>
-                    ))}
-                  </select>
-                  <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
-                    {selectedModel === 'default' && t('gradingConfirmation.usingDefault', { modelName: defaultModelName })}
-                    {availableModels.find(m => m.id === selectedModel)?.description}
-                  </div>
-                </div>
-                <div className="confirm-buttons">
-                  <button
-                    onClick={handleCancelSelection}
-                    className="cancel-button"
-                    disabled={isGrading}
-                  >
-                    <FaTimes size={18} />
-                    {isGrading ? t('gradingConfirmation.cancel') : t('gradingConfirmation.retry')}
-                  </button>
-                  <button
-                    onClick={confirmAndGrade}
-                    className="confirm-button"
-                    disabled={isGrading}
-                    style={isGrading ? { opacity: 0.7, cursor: 'wait' } : undefined}
-                  >
-                    <FaCheck size={18} />
-                    {isGrading ? t('gradingConfirmation.grading') : t('gradingConfirmation.grade')}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )
-        }
-      </div >
-    </div >
+        {/* Error popup - always on top */}
+        {gradingError && (
+          <div style={{
+            position: 'fixed',
+            bottom: '20px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 100000,
+            background: '#fef5f5',
+            border: '1px solid #f44336',
+            borderRadius: '8px',
+            padding: '12px 20px',
+            color: '#c62828',
+            fontSize: '14px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+            maxWidth: '400px',
+            textAlign: 'center'
+          }}>
+            ❌ {gradingError}
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 
