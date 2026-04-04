@@ -1,7 +1,8 @@
 import express from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import { GoogleGenAI } from '@google/genai'
+import { AVAILABLE_MODELS, DEFAULT_MODEL_ID, SUBJECTS, buildGradingPrompt } from '../../home-teacher-common/src/constants/grading.ts'
 
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -33,7 +34,6 @@ if (!admin.apps.length) {
   try {
     const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT;
     if (serviceAccountPath) {
-      // ローカル開発: サービスアカウントキーファイルを使用
       const fullPath = path.resolve(__dirname, `../${serviceAccountPath}`);
       const serviceAccountJson = fs.readFileSync(fullPath, 'utf8');
       const serviceAccount = JSON.parse(serviceAccountJson);
@@ -42,7 +42,6 @@ if (!admin.apps.length) {
       });
       console.log('Firebase Admin initialized with service account.');
     } else {
-      // Cloud Run本番: Application Default Credentials (ADC) を使用
       admin.initializeApp();
       console.log('Firebase Admin initialized with Application Default Credentials.');
     }
@@ -76,37 +75,25 @@ function validateAndOverrideGrading(student: string, correct: string): boolean {
   const normalize = (str: string) => {
     return str
       .trim()
-      // 全角英数字を半角に
       .replace(/[Ａ-Ｚａ-ｚ０-９]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
-      // 不要な空白を削除
       .replace(/\s+/g, '')
-      // 文末の句読点や「です」「ます」を削除（簡易的）
       .replace(/[、。\.．]$/, '')
       .replace(/(です|ます|だ)$/, '')
-      // 単位の揺れを吸収（一旦削除して数値のみ比較する戦略もアリだが、ここでは簡易正規化）
       .toLowerCase();
   };
 
   const normStudent = normalize(student);
   const normCorrect = normalize(correct);
 
-  // 完全一致
   if (normStudent === normCorrect) return true;
 
-  // 数値としての比較（"40" と "40.0" など）
   const numStudent = parseFloat(normStudent);
   const numCorrect = parseFloat(normCorrect);
   if (!isNaN(numStudent) && !isNaN(numCorrect) && Math.abs(numStudent - numCorrect) < 0.0001) {
     return true;
   }
 
-  // "40" と "40度" のような包含関係（正解が短い数字で、生徒が単位をつけている場合など）
-  // ただし逆（正解"40度"、生徒"40"）は文脈によるため慎重に。
-  // ここでは「正解」が「生徒の解答」に含まれている、またはその逆で、かつ数値が含まれている場合を救済
   if ((normStudent.includes(normCorrect) || normCorrect.includes(normStudent)) && !isNaN(numCorrect)) {
-    // 数字が含まれていて、かつ包含関係にあるならOKとする（危険かもしれないが40と40度は救いたい）
-    // いや、 "140" と "40" がマッチしてしまうのを防ぐ必要がある。
-    // ここはシンプルに「単位を除去して一致するか」を見る
     const removeUnit = (s: string) => s.replace(/[^0-9\.]/g, '');
     if (removeUnit(normStudent) === removeUnit(normCorrect) && removeUnit(normStudent).length > 0) {
       return true;
@@ -119,7 +106,6 @@ function validateAndOverrideGrading(student: string, correct: string): boolean {
 const app = express()
 const port = process.env.PORT || 3003
 
-// Increase payload size limit for base64 images, but skip for Stripe webhooks
 app.use((req, res, next) => {
   if (req.originalUrl === '/api/webhooks/stripe') {
     next();
@@ -129,7 +115,6 @@ app.use((req, res, next) => {
 });
 app.use(cors())
 
-// Log API Key status (do not log the actual key)
 console.log(`API Key status: ${process.env.GEMINI_API_KEY ? 'Present' : 'Missing'}`)
 
 if (!process.env.GEMINI_API_KEY) {
@@ -137,27 +122,12 @@ if (!process.env.GEMINI_API_KEY) {
 }
 
 // Google GenAI クライアント初期化
-// Google GenAI クライアント初期化
-// gemini-2.5-flash を使用（速度と精度のバランス重視）
 const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
 console.log(`Using Gemini Model: ${MODEL_NAME}`)
 
-// Initialize the Google Generative AI client
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '')
-const model = genAI.getGenerativeModel({ model: MODEL_NAME })
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' })
 
-// デフォルトモデルID
-const DEFAULT_MODEL_ID = 'gemini-2.5-flash'
-
-// 利用可能なモデル一覧
-const AVAILABLE_MODELS = [
-  { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro (Preview)', description: '最新の最高精度モデル（プレビュー版）' },
-  { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash (Preview)', description: '次世代の高速・高精度モデル（プレビュー版）' },
-  { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', description: '複雑な論理推論に強いハイエンドモデル' },
-  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', description: '速度と精度のバランスが良いモデル（推奨）' },
-  { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite', description: '超高速・低コストだが複雑な推論は苦手なモデル' },
-  { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', description: '安定版の旧高速モデル' },
-]
+// モデル定義・教科定義は home-teacher-common/src/constants/grading.ts から import
 
 app.get('/api/models', (req, res) => {
   res.json({
@@ -179,14 +149,12 @@ app.get('/api/proxy-pdf', async (req, res) => {
       return res.status(400).json({ error: 'URL parameter is required' })
     }
 
-    // Basic URL validation
     try {
       new URL(url)
     } catch {
       return res.status(400).json({ error: 'Invalid URL format' })
     }
 
-    // Only allow PDF files
     if (!url.toLowerCase().endsWith('.pdf')) {
       return res.status(400).json({ error: 'Only PDF files are allowed' })
     }
@@ -218,17 +186,8 @@ app.get('/api/proxy-pdf', async (req, res) => {
 // Subject Management
 // ==========================================
 
-// Define available subjects with multi-language support
-const SUBJECTS = [
-  { id: 'math', labels: { ja: '算数・数学', en: 'Math' }, icon: '📐', description: 'Mathematics and Arithmetic' },
-  { id: 'japanese', labels: { ja: '国語', en: 'Japanese' }, icon: '\u{1F1EF}\u{1F1F5}', description: 'Japanese Language' },
-  { id: 'english', labels: { ja: '英語', en: 'English' }, icon: '\u{1F1EC}\u{1F1E7}', description: 'English Language' },
-  { id: 'science', labels: { ja: '理科', en: 'Science' }, icon: '🔬', description: 'Science' },
-  { id: 'social', labels: { ja: '社会', en: 'Social Studies' }, icon: '🌍', description: 'Social Studies' },
-  { id: 'other', labels: { ja: 'その他', en: 'Other' }, icon: '📝', description: 'Other subjects' }
-]
+// 教科定義は home-teacher-common から import
 
-// GET /api/subjects - Return available subjects
 app.get('/api/subjects', (req, res) => {
   res.json({
     subjects: SUBJECTS,
@@ -247,12 +206,10 @@ app.post('/api/detect-subject', async (req, res) => {
 
     console.log('🔍 Detecting subject from cover page...')
 
-    // Extract mime type and clean base64
     const imageMatch = image.match(/^data:(image\/(png|jpeg));base64,(.+)$/)
     const imageData = imageMatch ? imageMatch[3] : image.replace(/^data:image\/\w+;base64,/, '')
     const imageMime = imageMatch ? imageMatch[1] : 'image/jpeg'
 
-    // Use Gemini to detect subject
     const detectionPrompt = `この画像はドリルや問題集の表紙です。
 この教材がどの教科のものか判定してください。
 
@@ -273,24 +230,26 @@ app.post('/api/detect-subject', async (req, res) => {
 
 JSONのみを出力してください。`
 
-    const result = await model.generateContent([
-      {
-        inlineData: {
-          mimeType: imageMime,
-          data: imageData
+    const result = await ai.models.generateContent({
+      model: MODEL_NAME,
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            { inlineData: { mimeType: imageMime, data: imageData } },
+            { text: detectionPrompt }
+          ]
         }
-      },
-      { text: detectionPrompt }
-    ])
+      ],
+      config: { thinkingConfig: { thinkingBudget: 0 } }
+    })
 
-    const response = await result.response
-    const responseText = response.text()
+    const responseText = result.text
 
     if (!responseText) {
       throw new Error('Empty response from Gemini')
     }
 
-    // Parse JSON response
     let jsonStr = responseText.replace(/```\w *\s * /g, '').replace(/```/g, '').trim()
     const jsonStart = jsonStr.indexOf('{')
     const jsonEnd = jsonStr.lastIndexOf('}')
@@ -305,7 +264,6 @@ JSONのみを出力してください。`
     } catch (e) {
       console.error('JSON Parse Error:', e)
       console.log('Raw Response:', responseText)
-      // Fallback to math if parsing fails
       return res.json({
         success: true,
         subjectId: 'math',
@@ -327,14 +285,14 @@ JSONのみを出力してください。`
     console.error('Error in /api/detect-subject:', error)
     res.status(500).json({
       success: false,
-      subjectId: 'math', // fallback
+      subjectId: 'math',
       confidence: 0,
       error: error instanceof Error ? error.message : 'Internal Server Error'
     })
   }
 })
 
-// 簡素化された採点API（切り抜き画像のみ）
+// 採点API
 app.post('/api/grade-work', async (req, res) => {
   try {
     const { croppedImageData, model: requestModel, language, subjectId } = req.body
@@ -346,172 +304,39 @@ app.post('/api/grade-work', async (req, res) => {
     const startTime = Date.now()
     console.log(`Grading work (subject: ${subjectId || 'default'})...`)
 
-    // Use requested model or default
     const currentModelName = requestModel || MODEL_NAME
-    const currentModel = requestModel ? genAI.getGenerativeModel({ model: currentModelName }) : model
 
-    // 言語設定の確認
-    const isJapanese = !language || language.startsWith('ja');
+    // プロンプトは home-teacher-common から生成
+    const simplePrompt = buildGradingPrompt(language, subjectId)
 
-    // 教科別のprompt補足説明
-    const getSubjectSpecificGuidance = (subject: string | undefined) => {
-      if (!subject) return '';
-
-      const guidance: Record<string, { ja: string; en: string }> = {
-        japanese: {
-          ja: `\n\n【国語の採点について】
-・記述問題では、生徒の表現が模範解答と異なっていても、意味が正しく伝わっていれば正解としてください。
-・漢字の書き取りでは、とめ・はね・はらいを厳密にチェックしてください。
-・文章の読解では、本文の内容と照らし合わせて判定してください。`,
-          en: `\n\n【Japanese Language Grading】
-・For written answers, accept answers that convey the correct meaning even if the expression differs from the model answer.
-・For kanji writing, check the strokes strictly.
-・For reading comprehension, verify against the text.`
-        },
-        math: {
-          ja: `\n\n【算数・数学の採点について】
-・計算過程が正しければ、最終的な答えが少し違っても部分点を考慮してください。
-・単位の記入漏れは減点対象ですが、計算自体が正しければ大きく減点しないでください。
-・図形問題では、補助線や考え方のプロセスも評価してください。`,
-          en: `\n\n【Math Grading】
-・If the calculation process is correct, consider partial credit even if the final answer is slightly different.
-・Missing units should be noted but not heavily penalized if the calculation is correct.
-・For geometry, evaluate the use of auxiliary lines and thought process.`
-        },
-        science: {
-          ja: `\n\n【理科の採点について】
-・専門用語の表記揺れ（ひらがな・カタカナ）は許容してください。
-・実験の観察結果は、要点が合っていれば表現が違っても正解としてください。
-・理由を問う問題では、科学的な根拠が含まれているか確認してください。`,
-          en: `\n\n【Science Grading】
-・Allow variations in technical term notation (hiragana/katakana).
-・For experimental observations, accept if the key points are correct.
-・For reasoning questions, verify scientific basis is included.`
-        },
-        social: {
-          ja: `\n\n【社会の採点について】
-・歴史的事項や地名の表記揺れは許容してください（例：「えどばくふ」「江戸幕府」）。
-・記述問題では、重要なキーワードが含まれていれば、文章構成が違っても正解としてください。
-・年号の前後数年のズレは大きく減点しないでください。`,
-          en: `\n\n【Social Studies Grading】
-・Allow variations in historical terms and place names.
-・For written answers, accept if key terms are included.
-・Minor errors in dates (within a few years) should not be heavily penalized.`
-        },
-        english: {
-          ja: `\n\n【英語の採点について】
-・スペルミスは減点対象ですが、意味が通じれば大きく減点しないでください。
-・文法問題では、文法の理解を重視してください。
-・英作文では、文法・語彙・内容の3つの観点で評価してください。`,
-          en: `\n\n【English Grading】
-・Spelling errors should be noted but not heavily penalized if meaning is clear.
-・For grammar questions, focus on grammatical understanding.
-・For composition, evaluate grammar, vocabulary, and content.`
-        }
-      };
-
-      const subjectGuidance = guidance[subject];
-      if (!subjectGuidance) return '';
-
-      return isJapanese ? subjectGuidance.ja : subjectGuidance.en;
-    };
-
-    let simplePrompt = '';
-
-    if (isJapanese) {
-      simplePrompt = `あなたは小中学生の家庭教師です。以下の画像には生徒の解答が写っています。
-${getSubjectSpecificGuidance(subjectId)}
-
-この画像を見て以下のステップで処理してください：
-1. 画像内に含まれる【すべての解答済みの問題】をもれなく特定してください（1問だけではありません）。
-2. 各問題について、問題の形式（記述式、記号選択、または「[   ]に生けてある[   ]」のような穴埋め・抜き出し形式など）を視覚的なレイアウトから正確に把握してください。
-3. 生徒の手書き解答を読み取ってください。穴埋め形式の場合は、生徒が書き込んだ言葉が前後の印字されたテキストと合わさって正しい意味を成しているかを確認してください。
-4. 正誤判定をしてください。
-5. 正解とフィードバックを提供してください。
-
-【重要】複数の問題がある場合は、必ず以下の形式のJSONの「配列（Array）」を出力してください。前置きや説明文（jsonコードブロック指定など）は絶対に含めないでください：
-      [
-        {
-          "problemNumber": "問題番号（例: '1(1)', '2(3)'）",
-          "studentAnswer": "生徒の解答（穴埋めの場合は、生徒が書いた部分のみ、または前後の文脈を含めた完成形）",
-          "isCorrect": true または false,
-          "correctAnswer": "正解",
-          "feedback": "問題の意図を踏まえた具体的なフィードバック",
-          "explanation": "解説",
-          "explanationSvg": "解説を補足するSVGコード（必要な場合のみ。不要ならnull）"
-        }
-      ]
-
-【SVG生成ルール】（必要な場合のみ）
-・解説に図解（図形、グラフ、数直線など）があると分かりやすい場合は、シンプルなSVGコードを生成してください。
-・複数の図が必要な場合は、1つのSVG内にレイアウト（左右や上下に配置）してまとめてください。
-・解説テキスト内では「図の左側」「図の右側」のように参照してください。
-・SVGタグのみを含めてください（xmlコードブロック指定などは不要）。
-・レスポンシブに表示できるよう、width/height属性は指定せず、viewBoxを適切に設定してください。
-・色は #333 (黒), #e74c3c (赤/強調), #3498db (青/補助) などを使い分けてください。
-
-JSONのみを出力してください。「はい」「承知しました」などの前置きは不要です。`;
-    } else {
-      // 英語プロンプト
-      simplePrompt = `You are a helpful tutor for students. The image shows a student's answer(s).
-${getSubjectSpecificGuidance(subjectId)}
-
-Please analyze this image by following these steps:
-1. Identify ALL answered problems in the image (do not stop at just one).
-2. Understand the format of the question by looking at the visual layout (e.g., fill-in-the-blanks where the student writes inside printed text frames, multiple choice, or free text).
-3. Recognize the student's handwritten answer. If it's a fill-in-the-blank, evaluate if the handwritten word correctly completes the printed sentence.
-4. Determine if the answer is correct provided the context.
-5. Provide the correct answer and feedback.
-
-【IMPORTANT】Output ONLY a JSON ARRAY in the following format. Do NOT include any introductory text or markdowns:
-[
-  {
-    "problemNumber": "Problem Number (e.g., '1(1)', '2(3)')",
-    "studentAnswer": "Student's Answer",
-    "isCorrect": true or false,
-    "correctAnswer": "Correct Answer",
-    "feedback": "Specific, encouraging feedback",
-    "explanation": "Explanation",
-    "explanationSvg": "SVG code if helpful (optional, null if not needed)"
-  }
-]
-
-【SVG Rules】(Optional)
-- Generate simple SVG code if diagrams (shapes, graphs, etc.) help explain.
-- No xml tags. Just the SVG tag.
-- Do not specify width/height, use viewBox.
-- Use colors like #333 (black), #e74c3c (red/emphasis), #3498db (blue/secondary).
-
-Output ONLY JSON. No introductory text.`;
-    }
-
-    // Extract mime type and clean base64
     const cropMatch = croppedImageData.match(/^data:(image\/(png|jpeg));base64,(.+)$/)
     const cropData = cropMatch ? cropMatch[3] : croppedImageData.replace(/^data:image\/\w+;base64,/, '')
     const cropMime = cropMatch ? cropMatch[1] : 'image/jpeg'
 
-    const result = await currentModel.generateContent([
-      {
-        inlineData: {
-          mimeType: cropMime,
-          data: cropData
+    const result = await ai.models.generateContent({
+      model: currentModelName,
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            { inlineData: { mimeType: cropMime, data: cropData } },
+            { text: simplePrompt }
+          ]
         }
-      },
-      { text: simplePrompt }
-    ])
+      ],
+      config: {
+        thinkingConfig: { thinkingBudget: 0 }
+      }
+    })
 
-    const response = await result.response
-    const responseText = response.text()
+    const responseText = result.text
 
     if (!responseText) {
       throw new Error('Empty response from Gemini')
     }
 
-    // JSONを抽出（マークダウンコードブロック除去 + JSON部分を探す）
-    // 開始タグ (```json など) と終了タグ(```) の両方を削除
     let jsonStr = responseText.replace(/```\w *\s * /g, '').replace(/```/g, '').trim()
 
-    // JSON部分を抽出（オブジェクト {} または 配列 [] を検出）
     const firstBrace = jsonStr.indexOf('{')
     const firstBracket = jsonStr.indexOf('[')
 
@@ -519,11 +344,9 @@ Output ONLY JSON. No introductory text.`;
     let jsonEnd: number
 
     if (firstBracket !== -1 && (firstBrace === -1 || firstBracket < firstBrace)) {
-      // 配列が先に見つかった場合
       jsonStart = firstBracket
       jsonEnd = jsonStr.lastIndexOf(']')
     } else if (firstBrace !== -1) {
-      // オブジェクトが先に見つかった場合
       jsonStart = firstBrace
       jsonEnd = jsonStr.lastIndexOf('}')
     } else {
@@ -546,33 +369,25 @@ Output ONLY JSON. No introductory text.`;
 
     const elapsedTime = parseFloat(((Date.now() - startTime) / 1000).toFixed(2))
 
-    // Normalize gradingData to always be an array of problems
     let problems: any[] = []
     if (Array.isArray(gradingData)) {
-      // AI returned an array of problems
       problems = gradingData.map((p: any) => ({ ...p, gradingSource: 'ai-simple' }))
     } else if (gradingData.problemNumber !== undefined) {
-      // AI returned a single problem object
       problems = [{ ...gradingData, gradingSource: 'ai-simple' }]
     } else {
-      // AI returned an object with numeric keys (e.g., {"0": {...}, "1": {...}})
       const numericKeys = Object.keys(gradingData).filter(k => /^\d+$/.test(k))
       if (numericKeys.length > 0) {
         problems = numericKeys.map(k => ({ ...gradingData[k], gradingSource: 'ai-simple' }))
       } else {
-        // Fallback: treat as single problem
         problems = [{ ...gradingData, gradingSource: 'ai-simple' }]
       }
     }
 
-    // AIの判定結果をサーバーサイドで検証・オーバーライド
     problems = problems.map(problem => {
       const { studentAnswer, correctAnswer, isCorrect } = problem
-
-      // もしAIが不正解と判定していても、文字列として一致していれば正解に強制変更
       if (!isCorrect && studentAnswer && correctAnswer) {
         if (validateAndOverrideGrading(studentAnswer, correctAnswer)) {
-          console.log(`[Override] AI judged incorrect, but server validation matched.Force CORRECT.Answer: "${studentAnswer}"`)
+          console.log(`[Override] AI judged incorrect, but server validation matched. Force CORRECT. Answer: "${studentAnswer}"`)
           return { ...problem, isCorrect: true, gradingSource: 'server-override' }
         }
       }
@@ -589,7 +404,7 @@ Output ONLY JSON. No introductory text.`;
       }
     }
 
-    console.log(`Grading complete.Problem: ${gradingData.problemNumber}, Correct: ${gradingData.isCorrect}`)
+    console.log(`Grading complete. Problems: ${problems.length}`)
     res.json(responseData)
 
   } catch (error) {
@@ -608,9 +423,14 @@ Output ONLY JSON. No introductory text.`;
 app.post('/api/create-checkout-session', authenticateUser, async (req, res) => {
   try {
     const user = (req as any).user;
-    // You would typically have a specific price ID from your Stripe Dashboard
-    // Replace this with your actual Price ID
     const priceId = process.env.STRIPE_PRICE_ID || 'price_1234567890';
+    const baseUrl = req.body?.baseUrl || req.headers.origin || 'http://localhost:5173';
+
+    let customerId: string | undefined;
+    if (admin.apps.length) {
+      const userDoc = await admin.firestore().collection('users').doc(user.uid).get();
+      customerId = userDoc.data()?.stripeCustomerId;
+    }
 
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
@@ -621,9 +441,10 @@ app.post('/api/create-checkout-session', authenticateUser, async (req, res) => {
         },
       ],
       mode: 'subscription',
-      success_url: `${req.headers.origin || 'http://localhost:5173'}/settings?success=true`,
-      cancel_url: `${req.headers.origin || 'http://localhost:5173'}/settings?canceled=true`,
-      client_reference_id: user.uid, // Tie the session to the Firebase User ID
+      success_url: `${baseUrl}/settings?success=true`,
+      cancel_url: `${baseUrl}/settings?canceled=true`,
+      client_reference_id: user.uid,
+      ...(customerId ? { customer: customerId } : { customer_email: user.email }),
     });
 
     res.json({ url: session.url });
@@ -633,7 +454,6 @@ app.post('/api/create-checkout-session', authenticateUser, async (req, res) => {
   }
 });
 
-// Configure Express to parse raw body for Stripe Webhook Verification
 app.use('/api/webhooks/stripe', express.raw({ type: 'application/json' }));
 
 app.post('/api/webhooks/stripe', async (req, res) => {
@@ -643,15 +463,13 @@ app.post('/api/webhooks/stripe', async (req, res) => {
   let event;
 
   try {
-    if (!sig || !endpointSecret) throw new Error('Missing stripe signature or webhok secret');
-    // Important: req.body MUST be raw buffer here, so express.raw() is used above
+    if (!sig || !endpointSecret) throw new Error('Missing stripe signature or webhook secret');
     event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
   } catch (err: any) {
     console.error(`⚠️  Webhook signature verification failed.`, err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
-  // Handle the event
   try {
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object as Stripe.Checkout.Session;
@@ -659,7 +477,6 @@ app.post('/api/webhooks/stripe', async (req, res) => {
 
       if (uid && admin.apps.length) {
         console.log(`💰 Checkout completed for user ${uid}. Marking as premium.`);
-        // Update Firestore
         await admin.firestore().collection('users').doc(uid).update({
           isPremium: true,
           stripeCustomerId: session.customer,
@@ -672,7 +489,6 @@ app.post('/api/webhooks/stripe', async (req, res) => {
 
       if (admin.apps.length) {
         console.log(`🔴 Subscription deleted for customer ${customerId}. Removing premium status.`);
-        // Note: You need to query the user by stripeCustomerId
         const usersRef = admin.firestore().collection('users');
         const snapshot = await usersRef.where('stripeCustomerId', '==', customerId).get();
 
@@ -680,14 +496,13 @@ app.post('/api/webhooks/stripe', async (req, res) => {
           const docId = snapshot.docs[0].id;
           await usersRef.doc(docId).update({
             isPremium: false,
-            snsRewardMinutes: 60, // Reset to free tier default
+            snsRewardMinutes: 60,
             stripeSubscriptionId: admin.firestore.FieldValue.delete(),
           });
           console.log(`User ${docId} downgraded successfully.`);
         }
       }
     }
-    // Return a 200 response to acknowledge receipt of the event
     res.send();
   } catch (error) {
     console.error('Error handling webhook event:', error);
@@ -708,13 +523,11 @@ app.post('/api/update-sns-time', authenticateUser, async (req, res) => {
       return res.status(500).json({ error: 'Firebase Admin not initialized' });
     }
 
-    // Check if the user is premium
     const userDoc = await admin.firestore().collection('users').doc(user.uid).get();
     if (!userDoc.exists || !userDoc.data()?.isPremium) {
       return res.status(403).json({ error: 'Forbidden: Only premium users can update SNS time' });
     }
 
-    // Update the value
     await admin.firestore().collection('users').doc(user.uid).update({
       snsRewardMinutes
     });

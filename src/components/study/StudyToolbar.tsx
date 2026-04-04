@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ICON_SVG } from '../../constants/icons';
-import { FiEdit2 } from 'react-icons/fi';
-import { BiEraser } from 'react-icons/bi';
+import { FiHome, FiCheckCircle, FiLoader, FiType, FiEdit2 } from 'react-icons/fi';
+import { BiEraser, BiSelection } from 'react-icons/bi';
 
 export type TextDirection = 'horizontal' | 'vertical-rl' | 'vertical-lr';
 
@@ -113,135 +112,25 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
 
     return (
         <div className="toolbar">
-            {/* 戻るボタン */}
+            {/* 戻るボタン & パンくず */}
             {onBack && (
                 <>
                     <button onClick={onBack} title="ホームに戻る">
-                        🏠
+                        <FiHome size={20} />
                     </button>
 
-                    <div className="divider"></div>
-
-                    {/* Split View Toggle */}
-                    <button
-                        onClick={toggleSplitView}
-                        title={isSplitView ? 'シングルビューに戻す' : '2画面表示 (Split View)'}
-                        className={isSplitView ? 'active' : ''}
-                    >
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <rect x="2" y="4" width="9" height="16" rx="1" stroke="currentColor" strokeWidth="1" fill={isSplitView ? "white" : "none"} />
-                            <rect x="13" y="4" width="9" height="16" rx="1" stroke="currentColor" strokeWidth="1" fill={isSplitView ? "white" : "none"} />
-                        </svg>
-                    </button>
-
-                    {/* Tab Switcher Button */}
-                    <button
-                        className={`tab-switcher-btn ${!isSplitView ? 'active' : ''}`}
-                        onClick={toggleActiveTab}
-                        title={isSplitView ? "シングルビューへ切替" : "A/B 切替"}
-                        style={{
-                            padding: '12px 8px',
-                            minWidth: 'auto',
-                            display: 'flex',
-                            alignItems: 'center',
-                        }}
-                    >
-                        {/* A Indicator */}
-                        <span
-                            style={{
-                                fontWeight: activeTab === 'A' ? 'bold' : 'normal',
-                                textDecoration: activeTab === 'A' ? 'underline' : 'none',
-                                color: activeTab === 'A' ? '#4CAF50' : 'inherit',
-                                fontSize: '0.85rem'
-                            }}
-                        >
-                            A
-                        </span>
-
-                        <span style={{ margin: '0 2px', color: '#ccc', fontSize: '0.85rem' }}>/</span>
-
-                        {/* B Indicator */}
-                        <span
-                            style={{
-                                fontWeight: activeTab === 'B' ? 'bold' : 'normal',
-                                textDecoration: activeTab === 'B' ? 'underline' : 'none',
-                                color: activeTab === 'B' ? '#4CAF50' : 'inherit',
-                                fontSize: '0.85rem'
-                            }}
-                        >
-                            B
-                        </span>
-                    </button>
-
-                    <div className="divider"></div>
+                    <div className="breadcrumb" style={{ fontSize: '13px', marginLeft: '10px', display: 'flex', alignItems: 'center' }}>
+                        <span style={{ color: '#999' }}>PDF</span>
+                        <span style={{ margin: '0 5px', color: '#ccc' }}>&gt;</span>
+                        <span style={{ color: '#333' }}>閲覧/編集</span>
+                    </div>
                 </>
             )}
 
             {/* 右寄せコンテナ */}
-            <div style={{ marginLeft: 'auto', display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>
                 <>
                     <div className="divider"></div>
-
-                    {/* 採点ボタン */}
-                    <button
-                        onClick={isSelectionMode ? cancelSelection : startGrading}
-                        className={isSelectionMode ? 'active' : ''}
-                        disabled={isGrading}
-                        title={isSelectionMode ? t('gradingConfirmation.cancel') : t('gradingConfirmation.gradeBySelection')}
-                    >
-                        {isGrading ? '⏳' : '✅'}
-                    </button>
-
-                    {/* テキスト入力ツール */}
-                    <div style={{ position: 'relative' }}>
-                        <button
-                            onClick={handleTextClick}
-                            className={isTextMode ? 'active' : ''}
-                            title={isTextMode ? 'テキストモード ON（クリックで設定）' : 'テキストモード OFF'}
-                            style={{ fontFamily: 'Times New Roman, serif', fontSize: '1.4rem' }}
-                        >
-                            T
-                        </button>
-
-                        {/* テキスト設定ポップアップ */}
-                        {isTextMode && showTextPopup && (
-                            <div className="tool-popup" style={{ minWidth: '180px' }}>
-                                <div className="popup-row">
-                                    <label>サイズ:</label>
-                                    <input
-                                        type="range"
-                                        min="10"
-                                        max="32"
-                                        value={textFontSize}
-                                        onChange={(e) => setTextFontSize(Number(e.target.value))}
-                                        style={{ width: '80px' }}
-                                    />
-                                    <span>{textFontSize}px</span>
-                                </div>
-                                <div className="popup-row">
-                                    <label>方向:</label>
-                                    <select
-                                        value={textDirection}
-                                        onChange={(e) => setTextDirection(e.target.value as TextDirection)}
-                                        style={{ padding: '4px', borderRadius: '4px' }}
-                                    >
-                                        <option value="horizontal">横書き (Z型)</option>
-                                        <option value="vertical-rl">縦書き右始 (N型)</option>
-                                        <option value="vertical-lr">縦書き左始</option>
-                                    </select>
-                                </div>
-                                <div className="popup-row">
-                                    <label>色:</label>
-                                    <input
-                                        type="color"
-                                        value={penColor}
-                                        onChange={(e) => setPenColor(e.target.value)}
-                                        style={{ width: '40px', height: '30px', border: '1px solid #ccc', cursor: 'pointer' }}
-                                    />
-                                </div>
-                            </div>
-                        )}
-                    </div>
 
                     {/* 描画ツール */}
                     <div style={{ position: 'relative' }}>
@@ -288,7 +177,7 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
                             className={isEraserMode ? 'active' : ''}
                             title={isEraserMode ? '消しゴムモード ON（クリックで設定）' : '消しゴムモード OFF'}
                         >
-                            <BiEraser size={20} />
+                            <BiEraser size={20} className="icon-scale-13" />
                         </button>
 
                         {/* 消しゴム設定ポップアップ */}
@@ -309,6 +198,119 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
                             </div>
                         )}
                     </div>
+
+
+                    {/* テキスト入力ツール */}
+                    <div style={{ position: 'relative' }}>
+                        <button
+                            onClick={handleTextClick}
+                            className={isTextMode ? 'active' : ''}
+                            title={isTextMode ? 'テキストモード ON（クリックで設定）' : 'テキストモード OFF'}
+                        >
+                             <FiType size={20} />
+                        </button>
+
+                        {/* テキスト設定ポップアップ */}
+                        {isTextMode && showTextPopup && (
+                            <div className="tool-popup" style={{ minWidth: '180px' }}>
+                                <div className="popup-row">
+                                    <label>サイズ:</label>
+                                    <input
+                                        type="range"
+                                        min="10"
+                                        max="32"
+                                        value={textFontSize}
+                                        onChange={(e) => setTextFontSize(Number(e.target.value))}
+                                        style={{ width: '80px' }}
+                                    />
+                                    <span>{textFontSize}px</span>
+                                </div>
+                                <div className="popup-row">
+                                    <label>方向:</label>
+                                    <select
+                                        value={textDirection}
+                                        onChange={(e) => setTextDirection(e.target.value as TextDirection)}
+                                    >
+                                        <option value="horizontal">横書き (Z型)</option>
+                                        <option value="vertical-rl">縦書き右始 (N型)</option>
+                                        <option value="vertical-lr">縦書き左始</option>
+                                    </select>
+                                </div>
+                                <div className="popup-row">
+                                    <label>色:</label>
+                                    <input
+                                        type="color"
+                                        value={penColor}
+                                        onChange={(e) => setPenColor(e.target.value)}
+                                        style={{ width: '40px', height: '30px', border: '1px solid #ccc', cursor: 'pointer' }}
+                                    />
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="divider" style={{ margin: '0 4px' }}></div>
+
+                    {/* Split View Toggle */}
+                    <button
+                        onClick={toggleSplitView}
+                        title={isSplitView ? 'シングルビューに戻す' : '2画面表示 (Split View)'}
+                        className={isSplitView ? 'active' : ''}
+                    >
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <rect x="2" y="4" width="9" height="16" rx="1" stroke="currentColor" strokeWidth="1" fill={isSplitView ? "white" : "none"} />
+                            <rect x="13" y="4" width="9" height="16" rx="1" stroke="currentColor" strokeWidth="1" fill={isSplitView ? "white" : "none"} />
+                        </svg>
+                    </button>
+
+                    {/* Tab Switcher Button */}
+                    <button
+                        className={`tab-switcher-btn ${!isSplitView ? 'active' : ''}`}
+                        onClick={toggleActiveTab}
+                        title={isSplitView ? "シングルビューへ切替" : "A/B 切替"}
+                        style={{
+                            minWidth: '45px',
+                        }}
+                    >
+                        {/* A Indicator */}
+                        <span
+                            style={{
+                                fontWeight: activeTab === 'A' ? 'bold' : 'normal',
+                                textDecoration: activeTab === 'A' ? 'underline' : 'none',
+                                color: activeTab === 'A' ? '#4CAF50' : 'inherit',
+                                fontSize: '0.85rem'
+                            }}
+                        >
+                            A
+                        </span>
+
+                        <span style={{ margin: '0 4px', color: '#ccc', fontSize: '0.85rem' }}>/</span>
+
+                        {/* B Indicator */}
+                        <span
+                            style={{
+                                fontWeight: activeTab === 'B' ? 'bold' : 'normal',
+                                textDecoration: activeTab === 'B' ? 'underline' : 'none',
+                                color: activeTab === 'B' ? '#4CAF50' : 'inherit',
+                                fontSize: '0.85rem'
+                            }}
+                        >
+                            B
+                        </span>
+                    </button>
+
+                    <div className="divider"></div>
+
+                    {/* 採点用・範囲選択ボタン */}
+                    <button
+                        onClick={isSelectionMode ? cancelSelection : startGrading}
+                        className={isSelectionMode ? 'active' : ''}
+                        disabled={isGrading}
+                        title={isSelectionMode ? t('gradingConfirmation.cancel') : t('gradingConfirmation.gradeBySelection')}
+                    >
+                        {isGrading ? <FiLoader size={20} className="animate-spin" /> : <BiSelection size={20} className="icon-scale-13" />}
+                    </button>
+
 
                 </>
             </div>
