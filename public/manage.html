@@ -202,7 +202,7 @@
       });
     }
 
-    const APP_SETTINGS_STORE_NAME = 'appSettings';
+    const APP_SETTINGS_STORE_NAME = 'settings';
 
     // URLパラメータから情報を取得
     const params = new URLSearchParams(window.location.search);
@@ -217,10 +217,11 @@
         try {
           const transaction = db.transaction([APP_SETTINGS_STORE_NAME], 'readonly');
           const objectStore = transaction.objectStore(APP_SETTINGS_STORE_NAME);
-          const request = objectStore.get('current');
+          const request = objectStore.get('app-settings'); // indexedDB.tsの定義に合わせる
           request.onsuccess = () => resolve(request.result);
           request.onerror = () => resolve(null);
         } catch (e) {
+          console.error('❌ 設定の取得に失敗:', e);
           resolve(null);
         }
       });
@@ -229,11 +230,14 @@
     async function initPage() {
       // 1. 制限時間の決定 (URLになければDBから)
       if (timeLimitMinutes <= 0) {
+        console.log('🔍 DBから設定をロード中...');
         const settings = await loadSettingsFromDB();
-        if (settings && settings.snsRewardMinutes) {
-          timeLimitMinutes = settings.snsRewardMinutes;
+        if (settings && settings.snsTimeLimitMinutes) {
+          timeLimitMinutes = settings.snsTimeLimitMinutes;
+          console.log('✅ DBから制限時間を取得:', timeLimitMinutes);
         } else {
-          timeLimitMinutes = 30; // フォールバック
+          timeLimitMinutes = 30; // 最終フォールバック
+          console.log('⚠️ 設定が見つからないためデフォルト値を使用:', timeLimitMinutes);
         }
       }
       document.getElementById('timeLimit').textContent = `制限時間: ${timeLimitMinutes}分`;
