@@ -22,7 +22,7 @@ const GradingResult = ({ result, snsLinks = [], timeLimitMinutes = 30, modelName
 
   const openSNSSelectionPage = () => {
     const returnUrlString = pdfId ? `./?pdfId=${encodeURIComponent(pdfId)}` : './'
-    const manageUrl = `manage.html?returnUrl=${encodeURIComponent(returnUrlString)}`
+    const manageUrl = `manage.html?v=${Date.now()}&returnUrl=${encodeURIComponent(returnUrlString)}`
     window.location.replace(manageUrl)
   }
 

@@ -63,10 +63,18 @@ export default defineConfig(({ mode }) => {
           cleanupOutdatedCaches: true,
           skipWaiting: true,
           clientsClaim: true,
+          navigateFallbackDenylist: [/manage\.html/], // <--- manage.htmlをフォールバックから除外
           globIgnores: ['**/opencv*.js'],
           globPatterns: ['**/*.{js,css,html,png,svg,woff,woff2}'],
-          maximumFileSizeToCacheInBytes: 15 * 1024 * 1024, // 15MB 念のため増やす
+          maximumFileSizeToCacheInBytes: 15 * 1024 * 1024,
           runtimeCaching: [
+            {
+              urlPattern: /manage\.html/, // <--- manage.htmlは常に最新を確認
+              handler: 'NetworkFirst',
+              options: {
+                cacheName: 'manage-html-cache'
+              }
+            },
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
               handler: 'CacheFirst',
