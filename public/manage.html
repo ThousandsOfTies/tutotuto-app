@@ -217,7 +217,7 @@
     let snsLinks = [];
     if (snsLinksJson) {
       try {
-        snsLinks = JSON.parse(decodeURIComponent(snsLinksJson));
+        snsLinks = JSON.parse(snsLinksJson);
         console.log('✅ SNSリンクのパース成功:', snsLinks);
       } catch (error) {
         console.error('❌ SNSリンクのパースに失敗:', error);
