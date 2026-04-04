@@ -202,16 +202,45 @@
       });
     }
 
+    const APP_SETTINGS_STORE_NAME = 'appSettings';
+
     // URLパラメータから情報を取得
     const params = new URLSearchParams(window.location.search);
-    const timeLimitMinutes = parseInt(params.get('time') || '30');
-    const timeLimit = timeLimitMinutes; // 後で使う用
-    const snsLinksJson = params.get('snsLinks');
     const returnUrl = params.get('returnUrl'); // 戻り先URL
+    const snsLinksJson = params.get('snsLinks');
+    let timeLimitMinutes = parseInt(params.get('time') || '0');
 
-    console.log('📱 URLパラメータ:', { timeLimitMinutes, snsLinksJson, returnUrl });
+    // データベースから設定を読み込む
+    async function loadSettingsFromDB() {
+      const db = await openDB();
+      return new Promise((resolve) => {
+        try {
+          const transaction = db.transaction([APP_SETTINGS_STORE_NAME], 'readonly');
+          const objectStore = transaction.objectStore(APP_SETTINGS_STORE_NAME);
+          const request = objectStore.get('current');
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => resolve(null);
+        } catch (e) {
+          resolve(null);
+        }
+      });
+    }
 
-    document.getElementById('timeLimit').textContent = `制限時間: ${timeLimitMinutes}分`;
+    async function initPage() {
+      // 1. 制限時間の決定 (URLになければDBから)
+      if (timeLimitMinutes <= 0) {
+        const settings = await loadSettingsFromDB();
+        if (settings && settings.snsRewardMinutes) {
+          timeLimitMinutes = settings.snsRewardMinutes;
+        } else {
+          timeLimitMinutes = 30; // フォールバック
+        }
+      }
+      document.getElementById('timeLimit').textContent = `制限時間: ${timeLimitMinutes}分`;
+
+      // 2. SNSリンクの初期化
+      await initSNSLinks();
+    }
 
     // SNSリンクをパース
     const SNS_LINKS_STORE_NAME = 'snsLinks';
@@ -290,7 +319,7 @@
 
     // 初期化実行
     const snsGrid = document.getElementById('snsGrid');
-    initSNSLinks();
+    initPage();
 
     // SNSを選択したらカウントダウン開始
     function startCountdownForSNS(snsLink) {
@@ -301,7 +330,7 @@
         snsId: snsLink.id,
         snsName: snsLink.name,
         snsUrl: snsLink.url,
-        timeLimitMinutes: timeLimit,
+        timeLimitMinutes: timeLimitMinutes,
         timestamp: startTime
       }).catch(err => {
         console.error('SNS利用履歴の保存に失敗:', err);
