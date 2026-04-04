@@ -426,6 +426,7 @@ app.post('/api/create-checkout-session', authenticateUser, async (req, res) => {
     const priceId = process.env.STRIPE_PRICE_ID || 'price_1234567890';
     const baseUrl = req.body?.baseUrl || req.headers.origin || 'http://localhost:5173';
 
+    // 既存のStripe顧客IDをFirebaseから取得
     let customerId: string | undefined;
     if (admin.apps.length) {
       const userDoc = await admin.firestore().collection('users').doc(user.uid).get();
@@ -464,6 +465,7 @@ app.post('/api/webhooks/stripe', async (req, res) => {
 
   try {
     if (!sig || !endpointSecret) throw new Error('Missing stripe signature or webhook secret');
+    // Important: req.body MUST be raw buffer here, so express.raw() is used above
     event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
   } catch (err: any) {
     console.error(`⚠️  Webhook signature verification failed.`, err.message);
@@ -483,6 +485,34 @@ app.post('/api/webhooks/stripe', async (req, res) => {
           stripeSubscriptionId: session.subscription,
         });
       }
+    } else if (event.type === 'customer.subscription.updated') {
+      const subscription = event.data.object as Stripe.Subscription;
+      const customerId = subscription.customer as string;
+      const status = subscription.status;
+
+      if (admin.apps.length) {
+        const usersRef = admin.firestore().collection('users');
+        const snapshot = await usersRef.where('stripeCustomerId', '==', customerId).get();
+
+        if (!snapshot.empty) {
+          const docId = snapshot.docs[0].id;
+          if (status === 'active' || status === 'trialing') {
+            console.log(`✅ Subscription updated to ${status} for customer ${customerId}. Granting premium.`);
+            await usersRef.doc(docId).update({
+              isPremium: true,
+              stripeSubscriptionId: subscription.id,
+            });
+          } else if (status === 'canceled' || status === 'unpaid' || status === 'incomplete_expired') {
+            console.log(`🔴 Subscription updated to ${status} for customer ${customerId}. Removing premium.`);
+            await usersRef.doc(docId).update({
+              isPremium: false,
+              snsRewardMinutes: 60,
+              stripeSubscriptionId: admin.firestore.FieldValue.delete(),
+            });
+          }
+          console.log(`Subscription status ${status} processed for user ${docId}.`);
+        }
+      }
     } else if (event.type === 'customer.subscription.deleted') {
       const subscription = event.data.object as Stripe.Subscription;
       const customerId = subscription.customer as string;
@@ -500,6 +530,24 @@ app.post('/api/webhooks/stripe', async (req, res) => {
             stripeSubscriptionId: admin.firestore.FieldValue.delete(),
           });
           console.log(`User ${docId} downgraded successfully.`);
+        }
+      }
+    } else if (event.type === 'invoice.payment_succeeded') {
+      const invoice = event.data.object as Stripe.Invoice;
+      const customerId = invoice.customer as string;
+      const subscriptionId = (invoice as any).subscription as string | undefined;
+
+      if (subscriptionId && admin.apps.length) {
+        const usersRef = admin.firestore().collection('users');
+        const snapshot = await usersRef.where('stripeCustomerId', '==', customerId).get();
+
+        if (!snapshot.empty) {
+          const docId = snapshot.docs[0].id;
+          console.log(`💰 Invoice payment succeeded for customer ${customerId}. Ensuring premium status.`);
+          await usersRef.doc(docId).update({
+            isPremium: true,
+            stripeSubscriptionId: subscriptionId,
+          });
         }
       }
     }
