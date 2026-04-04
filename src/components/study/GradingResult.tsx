@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { GradingResponseResult } from '@home-teacher/common/services/api'
 import { SNSLinkRecord } from '@home-teacher/common/utils/indexedDB'
-import { getSNSIcon } from '@home-teacher/common/constants/sns'
+// import { getSNSIcon } from '@home-teacher/common/constants/sns'
 import './GradingResult.css'
 
 interface GradingResultProps {
@@ -22,14 +22,11 @@ const GradingResult = ({ result, snsLinks = [], timeLimitMinutes = 30, modelName
 
   const openSNSSelectionPage = () => {
     const snsLinksJson = JSON.stringify(snsLinks.map(link => {
-      const snsIcon = getSNSIcon(link.id)
       return {
         id: link.id,
         name: link.name,
         url: link.url.startsWith('http://') || link.url.startsWith('https://') ? link.url : 'https://' + link.url,
-        icon: link.icon,
-        svg: snsIcon?.svg || null,
-        color: snsIcon?.color || '#666'
+        icon: link.icon
       }
     }))
     const baseUrl = `${window.location.origin}${import.meta.env.BASE_URL || '/'}`
