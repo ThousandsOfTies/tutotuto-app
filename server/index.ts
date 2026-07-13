@@ -122,7 +122,7 @@ if (!process.env.GEMINI_API_KEY) {
 }
 
 // Google GenAI クライアント初期化
-const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
+const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-3.5-flash'
 console.log(`Using Gemini Model: ${MODEL_NAME}`)
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' })

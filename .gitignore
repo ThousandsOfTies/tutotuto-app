@@ -36,4 +36,7 @@ PDFs/
 package-lock.json
 pnpm-lock.yaml
 hometeacher-api-firebase-adminsdk-fbsvc-69abc81b69.json
+# Firebase Admin SDK service-account credentials (never commit)
+firebase-adminsdk*.json
+firebase-adminsdk*.json:Zone.Identifier
 *.json.backup
