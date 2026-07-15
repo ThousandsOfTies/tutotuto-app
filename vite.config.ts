@@ -59,11 +59,6 @@ export default defineConfig(({ mode }) => {
           {
             src: `${iconSource}/app.png`,
             dest: ''
-          },
-          // メタリポジトリのVERSIONSファイルをコピー
-          {
-            src: '../../VERSIONS',
-            dest: ''
           }
         ]
       }),
