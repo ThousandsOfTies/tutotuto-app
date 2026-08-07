@@ -15,6 +15,44 @@ function App() {
   // Initialization Hook
   const { isInitialized, initialView, initialPDF, settingsVersion } = useAppInitializer()
 
+  // 公開済みのversion.jsonとビルド時のコミットIDを比較し、長時間開いたままの
+  // クライアントにも明示的な更新を促す。
+  const [manualUpdate, setManualUpdate] = useState(false)
+  const currentHash = (import.meta as any).env.VITE_APP_COMMIT_HASH || 'unknown'
+
+  useEffect(() => {
+    if (!isInitialized || currentHash === 'unknown') return
+
+    let disposed = false
+
+    const checkVersion = async () => {
+      try {
+        const response = await fetch(
+          `${import.meta.env.BASE_URL}version.json?v=${Date.now()}`,
+          { cache: 'no-store' }
+        )
+        if (!response.ok) return
+
+        const version = await response.json() as { commit?: string }
+        if (!disposed && version.commit && version.commit !== currentHash) {
+          console.log(`✨ New version detected: ${version.commit}`)
+          setManualUpdate(true)
+        }
+      } catch (error) {
+        // オフライン時などはPWAの通常動作を妨げない。
+        console.debug('Version check skipped:', error)
+      }
+    }
+
+    void checkVersion()
+    const interval = window.setInterval(checkVersion, 30 * 60 * 1000)
+
+    return () => {
+      disposed = true
+      window.clearInterval(interval)
+    }
+  }, [isInitialized, currentHash])
+
   // Sync initial state from hook
   useEffect(() => {
     if (isInitialized) {
@@ -93,7 +131,7 @@ function App() {
           key={`admin-${settingsVersion}`}
           onSelectPDF={handleSelectPDF}
           onEditPDF={handleEditPDF}
-          hasUpdate={needRefresh}
+          hasUpdate={needRefresh || manualUpdate}
           onUpdate={handleUpdate}
           studyTabLabel="Study"
         />

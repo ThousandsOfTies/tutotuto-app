@@ -9,6 +9,19 @@ import { execSync } from 'child_process'
 // Gitハッシュの取得
 const commitHash = execSync('git rev-parse --short HEAD', { cwd: __dirname }).toString().trim()
 
+// 起動中のクライアントが公開済みの最新版を確認するためのメタデータ。
+// ハッシュ付きアセットとは別名にして、常に同じURLから取得する。
+const versionMetadataPlugin = () => ({
+  name: 'emit-version-metadata',
+  generateBundle() {
+    this.emitFile({
+      type: 'asset',
+      fileName: 'version.json',
+      source: JSON.stringify({ commit: commitHash })
+    })
+  }
+})
+
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   // 環境変数を読み込む
@@ -73,7 +86,8 @@ export default defineConfig(({ mode }) => {
           skipWaiting: false,
           clientsClaim: false,
           navigateFallbackDenylist: [/manage\.html/], // <--- manage.htmlをフォールバックから除外
-          globIgnores: ['**/opencv*.js'],
+          // version.json はネットワークから最新版を確認するため、precacheしない。
+          globIgnores: ['**/opencv*.js', '**/version.json'],
           globPatterns: ['**/*.{js,css,html,png,svg,woff,woff2}'],
           maximumFileSizeToCacheInBytes: 15 * 1024 * 1024,
           runtimeCaching: [
@@ -111,7 +125,8 @@ export default defineConfig(({ mode }) => {
             }
           ]
         }
-      })
+      }),
+      versionMetadataPlugin()
     ],
     server: {
       port: 3000,
