@@ -6,6 +6,8 @@ import { BiEraser, BiSelection } from 'react-icons/bi';
 
 export type TextDirection = 'horizontal' | 'vertical-rl' | 'vertical-lr';
 
+const ERASER_SIZE_OPTIONS = [1, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100] as const;
+
 export interface BreadcrumbItem {
     label: string;
     onClick: () => void;
@@ -232,7 +234,7 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
                                         type="color"
                                         value={penColor}
                                         onChange={(e) => setPenColor(e.target.value)}
-                                        style={{ width: '40px', height: '30px', border: '1px solid #ccc', cursor: 'pointer' }}
+                                        className="color-swatch-input"
                                     />
                                 </div>
                                 <div className="popup-row">
@@ -241,11 +243,12 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
                                         type="range"
                                         min="1"
                                         max="10"
+                                        step="1"
                                         value={penSize}
                                         onChange={(e) => setPenSize(Number(e.target.value))}
                                         style={{ width: '100px' }}
                                     />
-                                    <span>{penSize}px</span>
+                                    <span>{penSize}pt</span>
                                 </div>
                             </div>
                         )}
@@ -274,14 +277,15 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
                                     <label>サイズ:</label>
                                     <input
                                         type="range"
-                                        min="10"
-                                        max="300"
-                                        step="5"
-                                        value={eraserSize}
-                                        onChange={(e) => setEraserSize(Number(e.target.value))}
+                                        min="0"
+                                        max={ERASER_SIZE_OPTIONS.length - 1}
+                                        step="1"
+                                        value={Math.max(0, ERASER_SIZE_OPTIONS.indexOf(eraserSize as typeof ERASER_SIZE_OPTIONS[number]))}
+                                        onChange={(e) => setEraserSize(ERASER_SIZE_OPTIONS[Number(e.target.value)])}
                                         style={{ width: '100px' }}
+                                        aria-valuetext={`${eraserSize}pt`}
                                     />
-                                    <span>{eraserSize}px</span>
+                                    <span>{eraserSize}pt</span>
                                 </div>
                             </div>
                         )}
@@ -330,7 +334,7 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
                                         type="color"
                                         value={penColor}
                                         onChange={(e) => setPenColor(e.target.value)}
-                                        style={{ width: '40px', height: '30px', border: '1px solid #ccc', cursor: 'pointer' }}
+                                        className="color-swatch-input"
                                     />
                                 </div>
                             </div>
