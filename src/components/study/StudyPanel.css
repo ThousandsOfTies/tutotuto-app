@@ -107,6 +107,37 @@
   box-shadow: 0 2px 8px rgba(76, 175, 80, 0.2);
 }
 
+/* ペンボタンに紐付く一度きりの案内。PDFの表示領域は縮めない。 */
+.pen-guidance {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 300;
+  width: min(320px, calc(100vw - 24px));
+  padding: 0.7rem 0.85rem;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #334155;
+  border: 1px solid #93c5fd;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.2);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  pointer-events: none;
+}
+
+.pen-guidance::before {
+  content: '';
+  position: absolute;
+  top: -7px;
+  right: 13px;
+  width: 12px;
+  height: 12px;
+  background: #ffffff;
+  border-top: 1px solid #93c5fd;
+  border-left: 1px solid #93c5fd;
+  transform: rotate(45deg);
+}
+
 /* Ensure icons that shouldn't change color (like pen with specific color) override this or inherit? 
    Actually, if I set color to #2E7D32, it might tint SVGs that use currentColor. 
    The user said "don't invert color". 

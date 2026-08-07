@@ -129,14 +129,14 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
   }, [])
 
   // Selection State
-  const [isSelectionMode, setIsSelectionMode] = useState(false)
+  const [isSelectionMode, setIsSelectionMode] = useState(true)
   const [selectionRect, setSelectionRect] = useState<{ x: number, y: number, width: number, height: number } | null>(null)
   const isSelectingRef = useRef(false)
   const selectionStartRef = useRef<{ x: number, y: number } | null>(null)
   const [isGrading, setIsGrading] = useState(false)
 
   // Tool State
-  const [isDrawingMode, setIsDrawingMode] = useState(true)
+  const [isDrawingMode, setIsDrawingMode] = useState(false)
   const [isEraserMode, setIsEraserMode] = useState(false)
   const [isTextMode, setIsTextMode] = useState(false)
   const [penColor, setPenColor] = useState('#FF0000') // Updated to match bottom block default

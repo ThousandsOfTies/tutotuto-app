@@ -115,6 +115,10 @@
         "errorTitle": "❌ エラー",
         "close": "閉じる"
     },
+    "pdfGuide": {
+        "rangeSelection": "回答範囲を選択して採点画面へ",
+        "penHint": "この画面は原本へのメモ用です。採点は範囲指定で回答部分を切り出した後にできます。"
+    },
     "gradingResult": {
         "title": "採点結果",
         "problem": "問題",

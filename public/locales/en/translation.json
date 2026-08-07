@@ -115,6 +115,10 @@
         "errorTitle": "❌ Error",
         "close": "Close"
     },
+    "pdfGuide": {
+        "rangeSelection": "Select an answer area to open the grading screen",
+        "penHint": "This screen is for notes on the original PDF. To grade an answer, select its area and use the Check button on the extracted screen."
+    },
     "gradingResult": {
         "title": "Grading Result",
         "problem": "Problem",

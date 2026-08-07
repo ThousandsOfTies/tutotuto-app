@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ICON_SVG } from '../../constants/icons';
 import { FiHome, FiRotateCcw, FiTrash2, FiCheckCircle, FiLoader, FiType, FiEdit2 } from 'react-icons/fi';
@@ -109,6 +109,12 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
     const [showTextPopup, setShowTextPopup] = useState(false);
     const [showPenPopup, setShowPenPopup] = useState(false);
     const [showEraserPopup, setShowEraserPopup] = useState(false);
+    const [showPenGuidance, setShowPenGuidance] = useState(false);
+    const penGuidanceTimerRef = useRef<number | undefined>();
+
+    useEffect(() => {
+        return () => window.clearTimeout(penGuidanceTimerRef.current);
+    }, []);
 
     // Wrappers to toggle popups and modes
     const handleTextClick = () => {
@@ -130,6 +136,15 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
             setShowPenPopup(false);
             setShowEraserPopup(false);
             setShowTextPopup(false);
+
+            // PDF原本で初めてペンを選んだときだけ、採点フローを案内する。
+            if (!onGrade) {
+                setShowPenGuidance(true);
+                window.clearTimeout(penGuidanceTimerRef.current);
+                penGuidanceTimerRef.current = window.setTimeout(() => {
+                    setShowPenGuidance(false);
+                }, 6500);
+            }
         }
     };
 
@@ -232,6 +247,12 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
                                     />
                                     <span>{penSize}px</span>
                                 </div>
+                            </div>
+                        )}
+
+                        {showPenGuidance && (
+                            <div className="pen-guidance" role="status">
+                                {t('pdfGuide.penHint')}
                             </div>
                         )}
                     </div>
@@ -409,7 +430,7 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
                                 onClick={isSelectionMode ? cancelSelection : startGrading}
                                 className={isSelectionMode ? 'active' : ''}
                                 disabled={isGrading}
-                                title={isSelectionMode ? t('gradingConfirmation.cancel') : t('gradingConfirmation.gradeBySelection')}
+                                title={isSelectionMode ? t('gradingConfirmation.cancel') : t('pdfGuide.rangeSelection')}
                             >
                                 {isGrading ? <FiLoader size={20} className="animate-spin" /> : <BiSelection size={20} className="icon-scale-13" />}
                             </button>
