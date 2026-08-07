@@ -248,7 +248,7 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
                                         onChange={(e) => setPenSize(Number(e.target.value))}
                                         style={{ width: '100px' }}
                                     />
-                                    <span>{penSize}pt</span>
+                                    <span>{penSize}px</span>
                                 </div>
                             </div>
                         )}
@@ -283,9 +283,9 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
                                         value={Math.max(0, ERASER_SIZE_OPTIONS.indexOf(eraserSize as typeof ERASER_SIZE_OPTIONS[number]))}
                                         onChange={(e) => setEraserSize(ERASER_SIZE_OPTIONS[Number(e.target.value)])}
                                         style={{ width: '100px' }}
-                                        aria-valuetext={`${eraserSize}pt`}
+                                        aria-valuetext={`${eraserSize}px`}
                                     />
-                                    <span>{eraserSize}pt</span>
+                                    <span>{eraserSize}px</span>
                                 </div>
                             </div>
                         )}
