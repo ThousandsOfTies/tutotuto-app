@@ -17,10 +17,6 @@ export interface BreadcrumbItem {
 interface StudyToolbarProps {
     onBack?: () => void;
     breadcrumbs?: BreadcrumbItem[];
-    isSplitView: boolean;
-    toggleSplitView: () => void;
-    activeTab: 'A' | 'B';
-    toggleActiveTab: () => void;
 
     // Grading
     isSelectionMode: boolean;
@@ -69,10 +65,6 @@ interface StudyToolbarProps {
 export const StudyToolbar: React.FC<StudyToolbarProps> = ({
     onBack,
     breadcrumbs,
-    isSplitView,
-    toggleSplitView,
-    activeTab,
-    toggleActiveTab,
     isSelectionMode,
     isGrading,
     startGrading,
@@ -340,61 +332,6 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
                             </div>
                         )}
                     </div>
-
-                    {!onGrade && (
-                        <>
-                            <div className="divider" style={{ margin: '0 4px' }}></div>
-
-                            {/* Split View Toggle (Moved to Tool Group) */}
-                            <button
-                                onClick={toggleSplitView}
-                                title={isSplitView ? 'シングルビューに戻す' : '2画面表示 (Split View)'}
-                                className={isSplitView ? 'active' : ''}
-                            >
-                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                    <rect x="2" y="4" width="9" height="16" rx="1" stroke="currentColor" strokeWidth="1" fill={isSplitView ? "white" : "none"} />
-                                    <rect x="13" y="4" width="9" height="16" rx="1" stroke="currentColor" strokeWidth="1" fill={isSplitView ? "white" : "none"} />
-                                </svg>
-                            </button>
-
-                            {/* Tab Switcher Button (Widened) */}
-                            <button
-                                className={`tab-switcher-btn ${!isSplitView ? 'active' : ''}`}
-                                onClick={toggleActiveTab}
-                                title={isSplitView ? "シングルビューへ切替" : "A/B 切替"}
-                                style={{
-                                    minWidth: '45px',
-                                }}
-                            >
-                                {/* A Indicator */}
-                                <span
-                                    style={{
-                                        fontWeight: activeTab === 'A' ? 'bold' : 'normal',
-                                        textDecoration: activeTab === 'A' ? 'underline' : 'none',
-                                        color: activeTab === 'A' ? '#4CAF50' : 'inherit',
-                                        fontSize: '0.85rem'
-                                    }}
-                                >
-                                    A
-                                </span>
-
-                                <span style={{ margin: '0 4px', color: '#ccc', fontSize: '0.85rem' }}>/</span>
-
-
-                                {/* B Indicator */}
-                                <span
-                                    style={{
-                                        fontWeight: activeTab === 'B' ? 'bold' : 'normal',
-                                        textDecoration: activeTab === 'B' ? 'underline' : 'none',
-                                        color: activeTab === 'B' ? '#4CAF50' : 'inherit',
-                                        fontSize: '0.85rem'
-                                    }}
-                                >
-                                    B
-                                </span>
-                            </button>
-                        </>
-                    )}
 
                     {/* Context-specific buttons */}
                     {onGrade ? (

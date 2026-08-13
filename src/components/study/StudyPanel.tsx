@@ -1401,16 +1401,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
             onClick: () => setActivePanelIndex(i),
             isCurrent: i === activePanelIndex
           }))}
-          isSplitView={isSplitView}
-          toggleSplitView={toggleSplitView}
-          activeTab={activeTab}
-          toggleActiveTab={() => {
-            if (isSplitView) {
-              setIsSplitView(false)
-            } else {
-              setActiveTab(prev => prev === 'A' ? 'B' : 'A')
-            }
-          }}
           isSelectionMode={isSelectionMode || isGradingCaptureMode}
           isGrading={isGrading}
           startGrading={startGrading}
