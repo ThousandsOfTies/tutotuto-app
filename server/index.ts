@@ -1,7 +1,7 @@
 import express from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
-import { GoogleGenAI } from '@google/genai'
+import { GoogleGenAI, ThinkingLevel } from '@google/genai'
 import { AVAILABLE_MODELS, DEFAULT_MODEL_ID, SUBJECTS, buildGradingPrompt } from '../../home-teacher-common/src/constants/grading.ts'
 
 import path from 'path';
@@ -122,8 +122,13 @@ if (!process.env.GEMINI_API_KEY) {
 }
 
 // Google GenAI クライアント初期化
-const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-3.5-flash'
+const MODEL_NAME = process.env.GEMINI_MODEL || DEFAULT_MODEL_ID
 console.log(`Using Gemini Model: ${MODEL_NAME}`)
+
+// Gemini 3 uses thinking levels; 2.5 Pro cannot disable thinking.
+const getThinkingConfig = (model: string) => model.startsWith('gemini-3')
+  ? { thinkingLevel: ThinkingLevel.LOW }
+  : { thinkingBudget: model.startsWith('gemini-2.5-pro') ? 128 : 0 }
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' })
 
@@ -132,7 +137,7 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' })
 app.get('/api/models', (req, res) => {
   res.json({
     models: AVAILABLE_MODELS,
-    default: DEFAULT_MODEL_ID
+    default: MODEL_NAME
   })
 })
 
@@ -241,7 +246,7 @@ JSONのみを出力してください。`
           ]
         }
       ],
-      config: { thinkingConfig: { thinkingBudget: 0 } }
+      config: { thinkingConfig: getThinkingConfig(MODEL_NAME) }
     })
 
     const responseText = result.text
@@ -304,7 +309,7 @@ app.post('/api/grade-work', async (req, res) => {
     const startTime = Date.now()
     console.log(`Grading work (subject: ${subjectId || 'default'})...`)
 
-    const currentModelName = requestModel || MODEL_NAME
+    const currentModelName = requestModel && requestModel !== 'default' ? requestModel : MODEL_NAME
 
     // プロンプトは home-teacher-common から生成
     const simplePrompt = buildGradingPrompt(language, subjectId)
@@ -325,7 +330,7 @@ app.post('/api/grade-work', async (req, res) => {
         }
       ],
       config: {
-        thinkingConfig: { thinkingBudget: 0 }
+        thinkingConfig: getThinkingConfig(currentModelName)
       }
     })
 
