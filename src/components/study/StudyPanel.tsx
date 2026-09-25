@@ -5,6 +5,7 @@ import { DEFAULT_MODEL_ID } from '@home-teacher/common/constants/grading'
 import { GradingResponseResult, getAvailableModels, gradeWork, ModelInfo } from '@home-teacher/common/services/api'
 import GradingResult from './GradingResult'
 import AnswerPanel, { AnswerPanelHandle } from './AnswerPanel'
+import VoiceTextEditor from './VoiceTextEditor'
 import { deleteAllDrawings, flushDrawingSaves, getAllDrawings, getPDFRecord, updatePDFRecord, getAllSNSLinks, SNSLinkRecord, PDFFileRecord, saveGradingHistory, generateGradingHistoryId, saveGradingImage, scheduleDrawingSave, saveTextAnnotation } from '@home-teacher/common/utils/indexedDB'
 import { ICON_SVG } from '../../constants/icons'
 import { DrawingPath } from '@thousands-of-ties/drawing-common'
@@ -50,6 +51,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
   const gradingPanelRef = useRef<HTMLDivElement>(null)
   const isGradingCapturingRef = useRef(false)
   const gradingCaptureStartRef = useRef<{ x: number; y: number } | null>(null)
+  const gradingCaptureRectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null)
   const [gradingCaptureRect, setGradingCaptureRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
   const [isGradingCaptureMode, setIsGradingCaptureMode] = useState(false)
 
@@ -506,31 +508,35 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
     const y = e.clientY - rect.top
     isGradingCapturingRef.current = true
     gradingCaptureStartRef.current = { x, y }
-    setGradingCaptureRect({ x, y, width: 0, height: 0 })
+    gradingCaptureRectRef.current = { x, y, width: 0, height: 0 }
+    setGradingCaptureRect(gradingCaptureRectRef.current)
   }
 
   const handleGradingCaptureMove = (e: React.MouseEvent) => {
     if (!isGradingCapturingRef.current || !gradingCaptureStartRef.current || !gradingPanelRef.current) return
     const rect = gradingPanelRef.current.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
+    const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left))
+    const y = Math.max(0, Math.min(rect.height, e.clientY - rect.top))
     const sx = gradingCaptureStartRef.current.x
     const sy = gradingCaptureStartRef.current.y
-    setGradingCaptureRect({
+    gradingCaptureRectRef.current = {
       x: Math.min(sx, x),
       y: Math.min(sy, y),
       width: Math.abs(x - sx),
       height: Math.abs(y - sy)
-    })
+    }
+    setGradingCaptureRect(gradingCaptureRectRef.current)
   }
 
   const handleGradingCaptureEnd = async () => {
     const sourcePanel = panelStack[activePanelIndex]
     if (sourcePanel?.type !== 'grading') return
-    if (!isGradingCapturingRef.current || !gradingCaptureRect || !gradingPanelRef.current) return
+    const captureRect = gradingCaptureRectRef.current
+    if (!isGradingCapturingRef.current || !captureRect || !gradingPanelRef.current) return
     isGradingCapturingRef.current = false
 
-    if (gradingCaptureRect.width < 10 || gradingCaptureRect.height < 10) {
+    if (captureRect.width < 10 || captureRect.height < 10) {
+      gradingCaptureRectRef.current = null
       setGradingCaptureRect(null)
       return
     }
@@ -538,34 +544,31 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
     try {
       const html2canvas = (await import('html2canvas')).default
       const panel = gradingPanelRef.current
-      // スクロールオフセットを取得
-      const scrollEl = panel.querySelector('.grading-result-content') as HTMLElement | null
-      const scrollTop = scrollEl?.scrollTop ?? 0
-
-      // オーバーレイ（枠線）を非表示にしてからキャプチャ
       const overlay = panel.querySelector('.grading-capture-overlay') as HTMLElement | null
-      if (overlay) overlay.style.display = 'none'
-
-      const fullCanvas = await html2canvas(panel, {
-        scale: window.devicePixelRatio || 2,
-        useCORS: true,
-        allowTaint: true,
-        scrollY: -scrollTop,
-        y: scrollTop,
-        height: panel.clientHeight,
-      })
-
-      if (overlay) overlay.style.display = ''
+      const previousDisplay = overlay?.style.display
+      let fullCanvas: HTMLCanvasElement
+      try {
+        if (overlay) overlay.style.display = 'none'
+        fullCanvas = await html2canvas(panel, {
+          scale: window.devicePixelRatio || 2,
+          useCORS: true,
+          backgroundColor: '#ffffff',
+          width: panel.clientWidth,
+          height: panel.clientHeight,
+        })
+      } finally {
+        if (overlay) overlay.style.display = previousDisplay || ''
+      }
 
       const dpr = window.devicePixelRatio || 2
       const cropCanvas = document.createElement('canvas')
-      cropCanvas.width = gradingCaptureRect.width * dpr
-      cropCanvas.height = gradingCaptureRect.height * dpr
+      cropCanvas.width = Math.round(captureRect.width * dpr)
+      cropCanvas.height = Math.round(captureRect.height * dpr)
       const ctx = cropCanvas.getContext('2d')!
       ctx.drawImage(
         fullCanvas,
-        gradingCaptureRect.x * dpr,
-        gradingCaptureRect.y * dpr,
+        captureRect.x * dpr,
+        captureRect.y * dpr,
         cropCanvas.width,
         cropCanvas.height,
         0, 0,
@@ -576,16 +579,19 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       const capturedImage = cropCanvas.toDataURL('image/png')
       pushPanel({ type: 'answer', questionImage: capturedImage, sourcePageNumbers: sourcePanel.sourcePageNumbers, source: 'grading' })
       setIsGradingCaptureMode(false)
+      gradingCaptureRectRef.current = null
       setGradingCaptureRect(null)
     } catch (error) {
       console.error('Grading capture error:', error)
       addStatusMessage('❌ キャプチャに失敗しました')
+      gradingCaptureRectRef.current = null
       setGradingCaptureRect(null)
     }
   }
 
   const cancelGradingCapture = () => {
     setIsGradingCaptureMode(false)
+    gradingCaptureRectRef.current = null
     setGradingCaptureRect(null)
     isGradingCapturingRef.current = false
   }
@@ -866,6 +872,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
     if (currentPanel?.type === 'grading') {
       // 採点結果パネル上での範囲選択（html2canvasでキャプチャ）
       setIsGradingCaptureMode(true)
+      gradingCaptureRectRef.current = null
       setGradingCaptureRect(null)
       addStatusMessage('📐 キャプチャする範囲を選択してください')
       return
@@ -1459,13 +1466,16 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
               {panel.type === 'pdf' && pdfContent}
               {panel.type === 'answer' && (
                 <AnswerPanel
-                  ref={answerPanelRef}
+                  ref={i === activePanelIndex ? answerPanelRef : undefined}
                   questionImage={panel.questionImage}
                   penColor={penColor}
                   penSize={penSize}
                   isEraserMode={isEraserMode}
+                  isTextMode={isTextMode}
+                  textFontSize={textFontSize}
+                  textDirection={textDirection}
                   eraserSize={eraserSize}
-                  onCanUndoChange={setCanUndoAnswer}
+                  onCanUndoChange={i === activePanelIndex ? setCanUndoAnswer : undefined}
                 />
               )}
               {panel.type === 'grading' && (
@@ -1517,47 +1527,25 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
 
         {/* テキスト入力ボックス */}
         {editingText && (
-          <div
+          <VoiceTextEditor
+            key={editingText.existingId ?? `${editingText.pageNum}-${editingText.x}-${editingText.y}`}
+            initialText={editingText.initialText || ''}
+            placeholder={t('textMode.placeholder')}
             style={{
               position: 'fixed',
               left: editingText.screenX,
               top: editingText.screenY,
-              zIndex: 10000,
-              background: 'white',
-              border: '2px solid #3498db',
-              borderRadius: '4px',
-              padding: '4px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
             }}
-          >
-            <textarea
-              autoFocus
-              defaultValue={editingText.initialText || ''}
-              placeholder={t('textMode.placeholder')}
-              style={{
-                fontSize: `${textFontSize}px`,
-                color: penColor,
-                writingMode: textDirection === 'horizontal' ? 'horizontal-tb' :
-                  textDirection === 'vertical-rl' ? 'vertical-rl' : 'vertical-lr',
-                border: 'none',
-                outline: 'none',
-                resize: 'both',
-                minWidth: textDirection === 'horizontal' ? '150px' : '50px',
-                minHeight: textDirection === 'horizontal' ? '50px' : '100px',
-                maxWidth: '300px',
-                maxHeight: '200px'
+            textStyle={{
+              fontSize: `${textFontSize}px`,
+              color: penColor,
+              writingMode: textDirection === 'horizontal' ? 'horizontal-tb' : textDirection,
+              minWidth: textDirection === 'horizontal' ? '180px' : '70px',
+              minHeight: textDirection === 'horizontal' ? '72px' : '120px',
               }}
-              onBlur={(e) => confirmText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') {
-                  setEditingText(null)
-                } else if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault()
-                  confirmText((e.target as HTMLTextAreaElement).value)
-                }
-              }}
-            />
-          </div>
+            onCommit={confirmText}
+            onCancel={() => setEditingText(null)}
+          />
         )}
 
         {/* Error popup - always on top */}

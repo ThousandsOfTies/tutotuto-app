@@ -1,5 +1,6 @@
 import { useRef, useState, useEffect, forwardRef, useImperativeHandle } from 'react'
 import { ICON_SVG } from '../../constants/icons'
+import VoiceTextEditor from './VoiceTextEditor'
 import './AnswerPanel.css'
 
 export interface AnswerPanelHandle {
@@ -14,8 +15,44 @@ interface AnswerPanelProps {
   penColor: string
   penSize: number
   isEraserMode: boolean
+  isTextMode: boolean
+  textFontSize: number
+  textDirection: 'horizontal' | 'vertical-rl' | 'vertical-lr'
   eraserSize: number
   onCanUndoChange?: (canUndo: boolean) => void
+}
+
+interface AnswerText {
+  id: string
+  x: number
+  y: number
+  text: string
+  fontSize: number
+  color: string
+  direction: 'horizontal' | 'vertical-rl' | 'vertical-lr'
+}
+
+interface AnswerSnapshot {
+  drawing: ImageData
+  texts: AnswerText[]
+}
+
+function drawAnswerText(ctx: CanvasRenderingContext2D, annotation: AnswerText): void {
+  ctx.save()
+  ctx.fillStyle = annotation.color
+  ctx.font = `${annotation.fontSize}px sans-serif`
+  ctx.textBaseline = 'top'
+  const lines = annotation.text.split('\n')
+  const lineHeight = annotation.fontSize * 1.3
+  if (annotation.direction === 'horizontal') {
+    lines.forEach((line, index) => ctx.fillText(line, annotation.x, annotation.y + index * lineHeight))
+  } else {
+    lines.forEach((line, column) => {
+      const columnX = annotation.x + (annotation.direction === 'vertical-rl' ? lines.length - 1 - column : column) * lineHeight
+      Array.from(line).forEach((character, row) => ctx.fillText(character, columnX, annotation.y + row * lineHeight))
+    })
+  }
+  ctx.restore()
 }
 
 // Canvas layout constants
@@ -29,6 +66,9 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
   penColor,
   penSize,
   isEraserMode,
+  isTextMode,
+  textFontSize,
+  textDirection,
   eraserSize,
   onCanUndoChange,
 }, ref) => {
@@ -38,7 +78,11 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
   const drawCanvasRef = useRef<HTMLCanvasElement>(null)
   const isDrawingRef = useRef(false)
   const lastPosRef = useRef<{ x: number; y: number } | null>(null)
-  const historyRef = useRef<ImageData[]>([])
+  const historyRef = useRef<AnswerSnapshot[]>([])
+  const textAnnotationsRef = useRef<AnswerText[]>([])
+  const [textAnnotations, setTextAnnotations] = useState<AnswerText[]>([])
+  const editingTextRef = useRef<{ x: number; y: number; id?: string; initialText: string } | null>(null)
+  const [editingText, setEditingText] = useState<{ x: number; y: number; id?: string; initialText: string } | null>(null)
   const [canUndo, setCanUndo] = useState(false)
   const [eraserCursorPos, setEraserCursorPos] = useState<{ x: number; y: number; diameter: number } | null>(null)
 
@@ -49,7 +93,12 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
   const [isCtrlPressed, setIsCtrlPressed] = useState(false)
   const panStartRef = useRef<{ x: number; y: number } | null>(null)
   const gestureRef = useRef<{ startZoom: number; startPan: { x: number; y: number }; startDist: number; startCenter: { x: number; y: number } } | null>(null)
+  const textTouchStartRef = useRef<{ x: number; y: number; moved: boolean } | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    onCanUndoChange?.(canUndo)
+  }, [canUndo, onCanUndoChange])
 
   // Build background canvas: question image + writing space
   // Portrait → image top, writing space below (×2 height ≈ A4→A3)
@@ -67,11 +116,8 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
 
     const isLandscape = imgW > imgH
 
-    // 横長・縦長ともに画像は上部中央に配置、書き込みスペースは下
-    // 横長はキャンバス幅を広くとって横長比率を維持
-    const w = isLandscape
-      ? SIDE_MARGIN * 2 + imgW * 2 + 32  // 画像幅×2＋余白（横長比率維持）
-      : Math.max(imgW + SIDE_MARGIN * 2, 800)
+    // 画像の中心と用紙の中心を合わせ、書き込みスペースは下に置く。
+    const w = Math.max(imgW + SIDE_MARGIN * 2, 800)
     const writingH = isLandscape
       ? Math.max(Math.round(imgH * 1.5), 400)
       : Math.max(imgH * 2, 360)
@@ -99,6 +145,10 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
     dCtx.clearRect(0, 0, w, h)
 
     historyRef.current = []
+    textAnnotationsRef.current = []
+    setTextAnnotations([])
+    editingTextRef.current = null
+    setEditingText(null)
     setCanUndo(false)
     onCanUndoChange?.(false)
   }
@@ -111,7 +161,13 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
       initCanvas(img)
       // Reset zoom/pan on new image
       setZoom(1.0)
-      setPanOffset({ x: 0, y: 0 })
+      const container = containerRef.current
+      const style = container ? getComputedStyle(container) : null
+      const imageWidth = bgCanvasRef.current?.width ?? 0
+      const availableWidth = container && style
+        ? container.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+        : imageWidth
+      setPanOffset({ x: Math.min(0, (availableWidth - imageWidth) / 2), y: 0 })
     }
     img.src = questionImage
   }, [questionImage])
@@ -128,11 +184,19 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
     }
   }, [])
 
+  const updateTextAnnotations = (next: AnswerText[]) => {
+    textAnnotationsRef.current = next
+    setTextAnnotations(next)
+  }
+
   const saveSnapshot = () => {
     const drawCanvas = drawCanvasRef.current
     if (!drawCanvas) return
     const ctx = drawCanvas.getContext('2d')!
-    historyRef.current.push(ctx.getImageData(0, 0, drawCanvas.width, drawCanvas.height))
+    historyRef.current.push({
+      drawing: ctx.getImageData(0, 0, drawCanvas.width, drawCanvas.height),
+      texts: [...textAnnotationsRef.current],
+    })
     setCanUndo(true)
     onCanUndoChange?.(true)
   }
@@ -140,15 +204,14 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
   const handleUndo = () => {
     const drawCanvas = drawCanvasRef.current
     if (!drawCanvas) return
+    const snapshot = historyRef.current.pop()
+    if (!snapshot) return
     const ctx = drawCanvas.getContext('2d')!
-    historyRef.current.pop()
-    if (historyRef.current.length > 0) {
-      ctx.putImageData(historyRef.current[historyRef.current.length - 1], 0, 0)
-    } else {
-      ctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height)
-      setCanUndo(false)
-      onCanUndoChange?.(false)
-    }
+    ctx.putImageData(snapshot.drawing, 0, 0)
+    updateTextAnnotations(snapshot.texts)
+    const hasHistory = historyRef.current.length > 0
+    setCanUndo(hasHistory)
+    onCanUndoChange?.(hasHistory)
   }
 
   const handleClear = () => {
@@ -157,6 +220,9 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
     saveSnapshot()
     const ctx = drawCanvas.getContext('2d')!
     ctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height)
+    updateTextAnnotations([])
+    editingTextRef.current = null
+    setEditingText(null)
   }
 
   // Composite bg + draw canvases into a single PNG
@@ -171,6 +237,7 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
     const ctx = out.getContext('2d')!
     ctx.drawImage(bgCanvas, 0, 0)
     ctx.drawImage(drawCanvas, 0, 0)
+    textAnnotationsRef.current.forEach(annotation => drawAnswerText(ctx, annotation))
     return out.toDataURL('image/png')
   }
 
@@ -179,7 +246,7 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
     undo: handleUndo,
     clear: handleClear,
     canUndo,
-  }), [canUndo, questionImage])
+  }), [canUndo, questionImage, onCanUndoChange])
 
   const getPos = (clientX: number, clientY: number): { x: number; y: number } => {
     const canvas = drawCanvasRef.current!
@@ -187,6 +254,63 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
     const scaleX = canvas.width / rect.width
     const scaleY = canvas.height / rect.height
     return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY }
+  }
+
+  const beginText = (clientX: number, clientY: number) => {
+    if (editingTextRef.current || !drawCanvasRef.current) return
+    const canvas = drawCanvasRef.current
+    const pos = getPos(clientX, clientY)
+    const editing = {
+      x: Math.max(0, Math.min(canvas.width - 1, pos.x)),
+      y: Math.max(0, Math.min(canvas.height - 1, pos.y)),
+      initialText: '',
+    }
+    editingTextRef.current = editing
+    setEditingText(editing)
+  }
+
+  const editText = (annotation: AnswerText) => {
+    if (editingTextRef.current) return
+    const editing = { x: annotation.x, y: annotation.y, id: annotation.id, initialText: annotation.text }
+    editingTextRef.current = editing
+    setEditingText(editing)
+  }
+
+  const cancelText = () => {
+    editingTextRef.current = null
+    setEditingText(null)
+  }
+
+  const commitText = (value: string) => {
+    const editing = editingTextRef.current
+    if (!editing) return
+    cancelText()
+    const nextText = value.trim()
+    const current = textAnnotationsRef.current
+    if (editing.id) {
+      const existing = current.find(annotation => annotation.id === editing.id)
+      if (!existing || existing.text === nextText) return
+      saveSnapshot()
+      updateTextAnnotations(nextText
+        ? current.map(annotation => annotation.id === editing.id ? { ...annotation, text: nextText } : annotation)
+        : current.filter(annotation => annotation.id !== editing.id))
+    } else if (nextText) {
+      saveSnapshot()
+      updateTextAnnotations([...current, {
+        id: `text-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        x: editing.x,
+        y: editing.y,
+        text: nextText,
+        fontSize: textFontSize,
+        color: penColor,
+        direction: textDirection,
+      }])
+    }
+  }
+
+  const eraseText = (id: string) => {
+    saveSnapshot()
+    updateTextAnnotations(textAnnotationsRef.current.filter(annotation => annotation.id !== id))
   }
 
   const startDraw = (clientX: number, clientY: number) => {
@@ -238,7 +362,11 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
     }
   }
 
-  const cursor = isPanning ? 'grabbing' : (isCtrlPressed ? 'grab' : (isEraserMode ? 'none' : ICON_SVG.penCursor(penColor)))
+  const cursor = isPanning ? 'grabbing' : (isCtrlPressed ? 'grab' : (isTextMode ? 'text' : (isEraserMode ? 'none' : ICON_SVG.penCursor(penColor))))
+  const editedAnnotation = editingText?.id
+    ? textAnnotations.find(annotation => annotation.id === editingText.id)
+    : undefined
+  const editingDirection = editedAnnotation?.direction ?? textDirection
 
   // Zoom/Pan Helpers
   useEffect(() => {
@@ -320,28 +448,40 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
           onMouseDown={(e) => {
             if (isCtrlPressed || e.button === 1) {
               startPanning(e.clientX, e.clientY)
-            } else {
+            } else if (e.button === 0 && !isTextMode) {
               startDraw(e.clientX, e.clientY)
             }
+          }}
+          onClick={(e) => {
+            if (isTextMode && !isCtrlPressed && e.button === 0) beginText(e.clientX, e.clientY)
           }}
           onMouseMove={(e) => {
             if (isPanning) {
               doPanning(e.clientX, e.clientY)
             } else {
-              if (isEraserMode) setEraserCursorPos(getEraserCursorPos(e.clientX, e.clientY))
-              if (e.buttons === 1) drawTo(e.clientX, e.clientY)
+              if (!isTextMode) {
+                if (isEraserMode) setEraserCursorPos(getEraserCursorPos(e.clientX, e.clientY))
+                if (e.buttons === 1) drawTo(e.clientX, e.clientY)
+              }
             }
           }}
           onMouseUp={() => { stopDraw(); stopPanning() }}
           onMouseLeave={() => { stopDraw(); stopPanning(); setEraserCursorPos(null) }}
           onTouchStart={(e) => {
             if (e.touches.length === 2) {
+              textTouchStartRef.current = null
               const t1 = e.touches[0]; const t2 = e.touches[1]
               const dist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY)
               const center = { x: (t1.clientX + t2.clientX) / 2, y: (t1.clientY + t2.clientY) / 2 }
               gestureRef.current = { startZoom: zoom, startPan: panOffset, startDist: dist, startCenter: center }
             } else if (e.touches.length === 1) {
-              const t = e.touches[0]; startDraw(t.clientX, t.clientY)
+              const t = e.touches[0]
+              if (isTextMode) {
+                e.preventDefault()
+                textTouchStartRef.current = { x: t.clientX, y: t.clientY, moved: false }
+              } else {
+                startDraw(t.clientX, t.clientY)
+              }
             }
           }}
           onTouchMove={(e) => {
@@ -359,12 +499,63 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
               setPanOffset({ x: center.x - rect.left - contentX * newZoom, y: center.y - rect.top - contentY * newZoom })
             } else if (e.touches.length === 1) {
               const t = e.touches[0]
-              if (isEraserMode) setEraserCursorPos(getEraserCursorPos(t.clientX, t.clientY))
-              drawTo(t.clientX, t.clientY)
+              if (isTextMode && textTouchStartRef.current) {
+                if (Math.hypot(t.clientX - textTouchStartRef.current.x, t.clientY - textTouchStartRef.current.y) > 8) {
+                  textTouchStartRef.current.moved = true
+                }
+              } else if (!isTextMode) {
+                if (isEraserMode) setEraserCursorPos(getEraserCursorPos(t.clientX, t.clientY))
+                drawTo(t.clientX, t.clientY)
+              }
             }
           }}
-          onTouchEnd={() => { stopDraw(); stopPanning(); setEraserCursorPos(null); gestureRef.current = null }}
+          onTouchEnd={(e) => {
+            if (isTextMode && e.touches.length === 0 && textTouchStartRef.current && !textTouchStartRef.current.moved) {
+              beginText(textTouchStartRef.current.x, textTouchStartRef.current.y)
+            }
+            textTouchStartRef.current = null
+            stopDraw(); stopPanning(); setEraserCursorPos(null); gestureRef.current = null
+          }}
         />
+        {textAnnotations.map(annotation => editingText?.id === annotation.id ? null : (
+          <div
+            key={annotation.id}
+            className="answer-text-annotation"
+            style={{
+              left: annotation.x,
+              top: annotation.y,
+              fontSize: annotation.fontSize,
+              color: annotation.color,
+              writingMode: annotation.direction === 'horizontal' ? 'horizontal-tb' : annotation.direction,
+              pointerEvents: isTextMode || isEraserMode ? 'auto' : 'none',
+              cursor: isTextMode ? 'text' : isEraserMode ? 'crosshair' : 'default',
+            }}
+            onClick={() => {
+              if (isTextMode) editText(annotation)
+              else if (isEraserMode) eraseText(annotation.id)
+            }}
+          >
+            {annotation.text}
+          </div>
+        ))}
+        {editingText && (
+          <VoiceTextEditor
+            key={editingText.id ?? `${editingText.x}-${editingText.y}`}
+            className="answer-text-editor"
+            initialText={editingText.initialText}
+            style={{
+              left: editingText.x,
+              top: editingText.y,
+            }}
+            textStyle={{
+              fontSize: editedAnnotation?.fontSize ?? textFontSize,
+              color: editedAnnotation?.color ?? penColor,
+              writingMode: editingDirection === 'horizontal' ? 'horizontal-tb' : editingDirection,
+            }}
+            onCommit={commitText}
+            onCancel={cancelText}
+          />
+        )}
         {/* Eraser circle cursor */}
         {isEraserMode && eraserCursorPos && (
           <div
