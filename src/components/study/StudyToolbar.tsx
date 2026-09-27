@@ -61,6 +61,7 @@ interface StudyToolbarProps {
     canUndoAnswer?: boolean;
     onUndoAnswer?: () => void;
     onClearAnswer?: () => void;
+    onDeleteStudyTrace?: () => void;
     selectedModel?: string;
     setSelectedModel?: (model: string) => void;
     availableModels?: Array<{ id: string; name: string; description?: string }>;
@@ -102,6 +103,7 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
     canUndoAnswer,
     onUndoAnswer,
     onClearAnswer,
+    onDeleteStudyTrace,
     selectedModel,
     setSelectedModel,
     availableModels,
@@ -201,6 +203,19 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
                                 </React.Fragment>
                             ))}
                         </div>
+                    )}
+
+                    {onDeleteStudyTrace && (
+                        <button
+                            type="button"
+                            className="study-trace-delete-button"
+                            onClick={onDeleteStudyTrace}
+                            title="この学習範囲の印を削除"
+                            aria-label="この学習範囲の印を削除"
+                        >
+                            <FiTrash2 size={18} />
+                            <span>印を削除</span>
+                        </button>
                     )}
 
 

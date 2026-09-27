@@ -1,10 +1,12 @@
 import { useRef, useState, useEffect, forwardRef, useImperativeHandle } from 'react'
 import { ICON_SVG } from '../../constants/icons'
+import type { PDFStudyAnswerState } from '@home-teacher/common/utils/indexedDB'
 import VoiceTextEditor from './VoiceTextEditor'
 import './AnswerPanel.css'
 
 export interface AnswerPanelHandle {
   getCompositeImage: () => Promise<string | null>
+  getAnswerState: () => PDFStudyAnswerState | null
   undo: () => void
   clear: () => void
   canUndo: boolean
@@ -12,6 +14,9 @@ export interface AnswerPanelHandle {
 
 interface AnswerPanelProps {
   questionImage: string | null
+  initialAnswerState?: PDFStudyAnswerState
+  onAnswerStateChange?: (state: PDFStudyAnswerState) => void
+  paperOrientation?: 'portrait' | 'landscape'
   penColor: string
   penSize: number
   isEraserMode: boolean
@@ -22,18 +27,12 @@ interface AnswerPanelProps {
   onCanUndoChange?: (canUndo: boolean) => void
 }
 
-interface AnswerText {
-  id: string
-  x: number
-  y: number
-  text: string
-  fontSize: number
-  color: string
-  direction: 'horizontal' | 'vertical-rl' | 'vertical-lr'
-}
+type AnswerText = PDFStudyAnswerState['texts'][number]
+type AnswerStroke = PDFStudyAnswerState['strokes'][number]
 
 interface AnswerSnapshot {
   drawing: ImageData
+  strokes: AnswerStroke[]
   texts: AnswerText[]
 }
 
@@ -59,10 +58,17 @@ function drawAnswerText(ctx: CanvasRenderingContext2D, annotation: AnswerText): 
 const SIDE_MARGIN = 48
 const TOP_MARGIN = 36
 const BOTTOM_MARGIN = 48
-const MIN_IMAGE_WIDTH = 600  // scale up captured image to at least this width
+const MIN_IMAGE_WIDTH = 600  // enlarge small captures when the height limit allows it
+const MAX_IMAGE_WIDTH = 1400
+const MAX_IMAGE_HEIGHT = 900
+const MIN_WRITING_HEIGHT = 420
+const PAPER_ASPECT_RATIO = 297 / 210  // A4 long side / short side
 
 const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
   questionImage,
+  initialAnswerState,
+  onAnswerStateChange,
+  paperOrientation,
   penColor,
   penSize,
   isEraserMode,
@@ -79,6 +85,8 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
   const isDrawingRef = useRef(false)
   const lastPosRef = useRef<{ x: number; y: number } | null>(null)
   const historyRef = useRef<AnswerSnapshot[]>([])
+  const strokesRef = useRef<AnswerStroke[]>([])
+  const activeStrokeRef = useRef<AnswerStroke | null>(null)
   const textAnnotationsRef = useRef<AnswerText[]>([])
   const [textAnnotations, setTextAnnotations] = useState<AnswerText[]>([])
   const editingTextRef = useRef<{ x: number; y: number; id?: string; initialText: string } | null>(null)
@@ -100,35 +108,42 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
     onCanUndoChange?.(canUndo)
   }, [canUndo, onCanUndoChange])
 
-  // Build background canvas: question image + writing space
-  // Portrait → image top, writing space below (×2 height ≈ A4→A3)
-  // Landscape → image left, writing space right (same width, ≈ A4→A3)
+  // Match the source PDF page orientation while keeping the capture centered above the writing space.
   const initCanvas = (img: HTMLImageElement) => {
     const bgCanvas = bgCanvasRef.current
     const drawCanvas = drawCanvasRef.current
     if (!bgCanvas || !drawCanvas) return
 
-    // Scale up small images so the writing area is comfortable to use
-    const displayScale = Math.max(1, MIN_IMAGE_WIDTH / img.naturalWidth)
+    // Keep tall captures within the top portion so the sheet remains writable.
+    const displayScale = Math.min(
+      Math.max(1, MIN_IMAGE_WIDTH / img.naturalWidth),
+      MAX_IMAGE_WIDTH / img.naturalWidth,
+      MAX_IMAGE_HEIGHT / img.naturalHeight,
+    )
     const imgW = Math.round(img.naturalWidth * displayScale)
     const imgH = Math.round(img.naturalHeight * displayScale)
     console.log('[AnswerPanel] initCanvas:', { naturalW: img.naturalWidth, naturalH: img.naturalHeight, displayScale, imgW, imgH })
 
-    const isLandscape = imgW > imgH
-
-    // 画像の中心と用紙の中心を合わせ、書き込みスペースは下に置く。
-    const w = Math.max(imgW + SIDE_MARGIN * 2, 800)
-    const writingH = isLandscape
-      ? Math.max(Math.round(imgH * 1.5), 400)
-      : Math.max(imgH * 2, 360)
-    const h = TOP_MARGIN + imgH + writingH + BOTTOM_MARGIN
+    const writingH = Math.max(MIN_WRITING_HEIGHT, Math.round(imgH * 0.7))
+    const orientation = paperOrientation ?? (imgW > imgH ? 'landscape' : 'portrait')
+    const contentHeight = TOP_MARGIN + imgH + writingH + BOTTOM_MARGIN
+    const contentWidth = imgW + SIDE_MARGIN * 2
+    let w: number
+    let h: number
+    if (orientation === 'landscape') {
+      h = Math.max(800, contentHeight, Math.ceil(Math.max(1200, contentWidth) / PAPER_ASPECT_RATIO))
+      w = Math.ceil(h * PAPER_ASPECT_RATIO)
+    } else {
+      w = Math.max(800, contentWidth, Math.ceil(Math.max(1132, contentHeight) / PAPER_ASPECT_RATIO))
+      h = Math.ceil(w * PAPER_ASPECT_RATIO)
+    }
     const imageLeft = Math.round((w - imgW) / 2)  // 常に水平中央
 
     bgCanvas.width = w
     bgCanvas.height = h
     drawCanvas.width = w
     drawCanvas.height = h
-    console.log('[AnswerPanel] canvas size:', { w, h, isLandscape })
+    console.log('[AnswerPanel] canvas size:', { w, h, orientation })
 
     const ctx = bgCanvas.getContext('2d')!
 
@@ -145,8 +160,41 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
     dCtx.clearRect(0, 0, w, h)
 
     historyRef.current = []
-    textAnnotationsRef.current = []
-    setTextAnnotations([])
+    strokesRef.current = []
+    activeStrokeRef.current = null
+    const saved = initialAnswerState
+    let restoredTexts: AnswerText[] = []
+    if (saved && saved.canvasWidth > 0 && saved.canvasHeight > 0) {
+      const scaleX = w / saved.canvasWidth
+      const scaleY = h / saved.canvasHeight
+      const lineScale = Math.sqrt(scaleX * scaleY)
+      for (const stroke of saved.strokes ?? []) {
+        if (stroke.points.length < 2) continue
+        dCtx.globalCompositeOperation = stroke.eraser ? 'destination-out' : 'source-over'
+        dCtx.strokeStyle = stroke.color
+        dCtx.lineWidth = stroke.width * lineScale
+        dCtx.lineCap = 'round'
+        dCtx.lineJoin = 'round'
+        dCtx.beginPath()
+        dCtx.moveTo(stroke.points[0][0] * scaleX, stroke.points[0][1] * scaleY)
+        for (const [x, y] of stroke.points.slice(1)) dCtx.lineTo(x * scaleX, y * scaleY)
+        dCtx.stroke()
+      }
+      dCtx.globalCompositeOperation = 'source-over'
+      strokesRef.current = (saved.strokes ?? []).map(stroke => ({
+        ...stroke,
+        width: stroke.width * lineScale,
+        points: stroke.points.map(([x, y]): [number, number] => [x * scaleX, y * scaleY]),
+      }))
+      restoredTexts = (saved.texts ?? []).map(annotation => ({
+        ...annotation,
+        x: annotation.x * scaleX,
+        y: annotation.y * scaleY,
+        fontSize: annotation.fontSize * lineScale,
+      }))
+    }
+    textAnnotationsRef.current = restoredTexts
+    setTextAnnotations(restoredTexts)
     editingTextRef.current = null
     setEditingText(null)
     setCanUndo(false)
@@ -156,8 +204,10 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
   // Load image and init canvas when questionImage changes
   useEffect(() => {
     if (!questionImage) return
+    let cancelled = false
     const img = new Image()
     img.onload = () => {
+      if (cancelled) return
       initCanvas(img)
       // Reset zoom/pan on new image
       setZoom(1.0)
@@ -170,7 +220,11 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
       setPanOffset({ x: Math.min(0, (availableWidth - imageWidth) / 2), y: 0 })
     }
     img.src = questionImage
-  }, [questionImage])
+    return () => {
+      cancelled = true
+      img.onload = null
+    }
+  }, [questionImage, paperOrientation, initialAnswerState])
 
   // Ctrl Key detection
   useEffect(() => {
@@ -184,9 +238,29 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
     }
   }, [])
 
+  const getAnswerState = (): PDFStudyAnswerState | null => {
+    const canvas = drawCanvasRef.current
+    if (!canvas || canvas.width === 0 || canvas.height === 0) return null
+    const activeStroke = activeStrokeRef.current
+    return {
+      canvasWidth: canvas.width,
+      canvasHeight: canvas.height,
+      strokes: activeStroke && activeStroke.points.length > 1
+        ? [...strokesRef.current, activeStroke]
+        : strokesRef.current,
+      texts: textAnnotationsRef.current,
+    }
+  }
+
+  const publishAnswerState = () => {
+    const state = getAnswerState()
+    if (state) onAnswerStateChange?.(state)
+  }
+
   const updateTextAnnotations = (next: AnswerText[]) => {
     textAnnotationsRef.current = next
     setTextAnnotations(next)
+    publishAnswerState()
   }
 
   const saveSnapshot = () => {
@@ -195,6 +269,7 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
     const ctx = drawCanvas.getContext('2d')!
     historyRef.current.push({
       drawing: ctx.getImageData(0, 0, drawCanvas.width, drawCanvas.height),
+      strokes: [...strokesRef.current],
       texts: [...textAnnotationsRef.current],
     })
     setCanUndo(true)
@@ -208,6 +283,8 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
     if (!snapshot) return
     const ctx = drawCanvas.getContext('2d')!
     ctx.putImageData(snapshot.drawing, 0, 0)
+    strokesRef.current = snapshot.strokes
+    activeStrokeRef.current = null
     updateTextAnnotations(snapshot.texts)
     const hasHistory = historyRef.current.length > 0
     setCanUndo(hasHistory)
@@ -220,6 +297,8 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
     saveSnapshot()
     const ctx = drawCanvas.getContext('2d')!
     ctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height)
+    strokesRef.current = []
+    activeStrokeRef.current = null
     updateTextAnnotations([])
     editingTextRef.current = null
     setEditingText(null)
@@ -243,10 +322,11 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
 
   useImperativeHandle(ref, () => ({
     getCompositeImage,
+    getAnswerState,
     undo: handleUndo,
     clear: handleClear,
     canUndo,
-  }), [canUndo, questionImage, onCanUndoChange])
+  }), [canUndo, questionImage, onCanUndoChange, onAnswerStateChange])
 
   const getPos = (clientX: number, clientY: number): { x: number; y: number } => {
     const canvas = drawCanvasRef.current!
@@ -316,7 +396,16 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
   const startDraw = (clientX: number, clientY: number) => {
     saveSnapshot()
     isDrawingRef.current = true
-    lastPosRef.current = getPos(clientX, clientY)
+    const canvas = drawCanvasRef.current!
+    const pos = getPos(clientX, clientY)
+    const scale = canvas.width / canvas.getBoundingClientRect().width
+    lastPosRef.current = pos
+    activeStrokeRef.current = {
+      points: [[Math.round(pos.x * 10) / 10, Math.round(pos.y * 10) / 10]],
+      width: (isEraserMode ? eraserSize : penSize) * scale,
+      color: penColor,
+      eraser: isEraserMode,
+    }
   }
 
   const drawTo = (clientX: number, clientY: number) => {
@@ -324,27 +413,30 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
     const canvas = drawCanvasRef.current
     const ctx = canvas.getContext('2d')!
     const pos = getPos(clientX, clientY)
-    const rect = canvas.getBoundingClientRect()
-    const scale = canvas.width / rect.width
+    const stroke = activeStrokeRef.current
+    if (!stroke) return
 
     ctx.beginPath()
     ctx.moveTo(lastPosRef.current.x, lastPosRef.current.y)
     ctx.lineTo(pos.x, pos.y)
-    if (isEraserMode) {
-      ctx.globalCompositeOperation = 'destination-out'
-      ctx.lineWidth = eraserSize * scale
-    } else {
-      ctx.globalCompositeOperation = 'source-over'
-      ctx.strokeStyle = penColor
-      ctx.lineWidth = penSize * scale
-    }
+    ctx.globalCompositeOperation = stroke.eraser ? 'destination-out' : 'source-over'
+    ctx.strokeStyle = stroke.color
+    ctx.lineWidth = stroke.width
     ctx.lineCap = 'round'
     ctx.lineJoin = 'round'
     ctx.stroke()
+    stroke.points.push([Math.round(pos.x * 10) / 10, Math.round(pos.y * 10) / 10])
     lastPosRef.current = pos
   }
 
   const stopDraw = () => {
+    const stroke = activeStrokeRef.current
+    if (stroke && stroke.points.length > 1) {
+      strokesRef.current = [...strokesRef.current, stroke]
+      activeStrokeRef.current = null
+      publishAnswerState()
+    }
+    activeStrokeRef.current = null
     if (drawCanvasRef.current) {
       drawCanvasRef.current.getContext('2d')!.globalCompositeOperation = 'source-over'
     }
@@ -469,6 +561,7 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
           onMouseLeave={() => { stopDraw(); stopPanning(); setEraserCursorPos(null) }}
           onTouchStart={(e) => {
             if (e.touches.length === 2) {
+              stopDraw()
               textTouchStartRef.current = null
               const t1 = e.touches[0]; const t2 = e.touches[1]
               const dist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY)
