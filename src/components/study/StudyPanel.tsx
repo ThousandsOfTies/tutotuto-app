@@ -1303,6 +1303,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
 
   const activePanel = panelStack[activePanelIndex]
   const isOnAnswerPanel = activePanel?.type === 'answer'
+  const isPenActive = isOnAnswerPanel ? !isEraserMode && !isTextMode : isDrawingMode
   const activeTraceId = activePanel?.type !== 'pdf' ? activePanel?.traceId : undefined
   const deleteActiveStudyTrace = async () => {
     if (!activeTraceId || !confirm('この学習範囲の印を削除しますか？ 採点履歴一覧の記録は残ります。')) return
@@ -1646,7 +1647,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
           setTextFontSize={setTextFontSize}
           textDirection={textDirection}
           setTextDirection={setTextDirection}
-          isDrawingMode={isDrawingMode}
+          isDrawingMode={isPenActive}
           toggleDrawingMode={toggleDrawingMode}
           penColor={penColor}
           setPenColor={setPenColor}
