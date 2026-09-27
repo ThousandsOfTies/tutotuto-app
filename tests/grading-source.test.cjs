@@ -31,6 +31,26 @@ const redrawAnswerStrokes = handler('redrawAnswerStrokes', {}, answerAst);
 const doSegmentsIntersect = handler('doSegmentsIntersect', {}, drawingAst);
 const doPathsIntersect = handler('doPathsIntersect', { doSegmentsIntersect }, drawingAst);
 const isScratchPattern = handler('isScratchPattern', {}, drawingAst);
+const getGradingCaptureGeometry = handler('getGradingCaptureGeometry', {});
+
+test('grading question markers stay anchored to scrolled result content', () => {
+    const panel = { left: 10, top: 20 };
+    const before = getGradingCaptureGeometry(
+        { x: 50, y: 200, width: 100, height: 80 }, panel,
+        { left: 30, top: 20, width: 600, height: 1200 },
+    );
+    const after = getGradingCaptureGeometry(
+        { x: 50, y: 100, width: 100, height: 80 }, panel,
+        { left: 30, top: -80, width: 600, height: 1200 },
+    );
+    assert.equal(before.region.x, after.region.x);
+    assert.equal(before.region.y, after.region.y);
+    assert.equal(after.region.width, 1 / 6);
+    assert.equal(getGradingCaptureGeometry(
+        { x: 0, y: 0, width: 5, height: 5 }, panel,
+        { left: 30, top: 20, width: 600, height: 1200 },
+    ), null);
+});
 
 function capture({ activeTab = 'A', isSplitView = false, pageA = 1, pageB = 5, pageAOrientation = 'landscape', pageBOrientation = 'portrait' } = {}) {
     const bounds = (left, right) => ({ left, right, top: 0, bottom: 100, width: right - left, height: 100 });
@@ -80,9 +100,41 @@ test('captures A, B, both panes, duplicate pages and empty selections accurately
     assert.deepEqual(Array.from(zoomed.regions, region => [region.pageNumber, region.x, region.width]), [
         [1, 0, 0.4], [5, 0, 1],
     ]);
+    assert.deepEqual(JSON.parse(JSON.stringify(zoomed.captureLayout)), {
+        width: 200, height: 100,
+        regions: [
+            { x: 0, y: 0, width: 100, height: 100 },
+            { x: 100, y: 0, width: 100, height: 100 },
+        ],
+    });
     assert.equal((await capture()(rect(0, 40))).paperOrientation, 'landscape');
     assert.equal((await capture({ activeTab: 'B' })(rect(100, 40))).paperOrientation, 'portrait');
     assert.equal(await capture({ isSplitView: true })(rect(300, 100)), null);
+});
+
+test('recreates a cutout at its original size and pane positions', async () => {
+    const canvases = [];
+    const page = {
+        getViewport: () => ({ width: 300, height: 200 }),
+        render: () => ({ promise: Promise.resolve() }),
+    };
+    const run = handler('recreateQuestionImage', {
+        pdfDoc: { getPage: async () => page },
+        document: { createElement: () => {
+            const canvas = { calls: [], toDataURL: () => 'recreated' };
+            canvas.getContext = () => ({
+                drawImage: (...args) => canvas.calls.push(args), fillRect() {},
+            });
+            canvases.push(canvas);
+            return canvas;
+        } },
+    });
+    const regions = [{ pageNumber: 1, x: 0.2, y: 0.1, width: 0.4, height: 0.5 }];
+    const layout = { width: 400, height: 200, regions: [{ x: 100, y: 20, width: 250, height: 150 }] };
+    assert.equal(await run(regions, layout), 'recreated');
+    const result = canvases.at(-1);
+    assert.deepEqual([result.width, result.height], [400, 200]);
+    assert.deepEqual(result.calls[0].slice(1), [100, 20, 250, 150]);
 });
 
 test('reads the orientation of the source PDF page', async () => {
@@ -108,6 +160,7 @@ test('answer paper follows PDF orientation and centers the selected image', () =
         const drawCanvas = { getContext: () => ({ clearRect() {} }) };
         const run = handler('initCanvas', {
             bgCanvasRef: { current: bgCanvas }, drawCanvasRef: { current: drawCanvas },
+            questionLayoutRef: { current: undefined },
             paperOrientation, initialAnswerState: undefined,
             SIDE_MARGIN: 48, TOP_MARGIN: 36, BOTTOM_MARGIN: 48,
             MIN_IMAGE_WIDTH: 600, MAX_IMAGE_WIDTH: 1400, MAX_IMAGE_HEIGHT: 900,
@@ -138,8 +191,10 @@ test('rebuilds pen strokes and text on the answer sheet', () => {
         lineTo: (...args) => drawn.push(args), stroke() {},
     }) };
     const strokesRef = { current: [] }, textAnnotationsRef = { current: [] };
+    const questionLayoutRef = { current: undefined };
     const run = handler('initCanvas', {
         bgCanvasRef: { current: bgCanvas }, drawCanvasRef: { current: drawCanvas },
+        questionLayoutRef,
         paperOrientation: 'portrait', initialAnswerState: saved,
         SIDE_MARGIN: 48, TOP_MARGIN: 36, BOTTOM_MARGIN: 48,
         MIN_IMAGE_WIDTH: 600, MAX_IMAGE_WIDTH: 1400, MAX_IMAGE_HEIGHT: 900,
@@ -153,8 +208,72 @@ test('rebuilds pen strokes and text on the answer sheet', () => {
     assert.equal(drawn.length, 1);
     assert.equal(strokesRef.current.length, 1);
     assert.equal(textAnnotationsRef.current[0].text, '解答');
-    assert.equal(drawn[0][0], 150 * bgCanvas.width / saved.canvasWidth);
-    assert.equal(drawn[0][1], 200 * bgCanvas.height / saved.canvasHeight);
+    assert.deepEqual([bgCanvas.width, bgCanvas.height], [800, 1200]);
+    assert.deepEqual(drawn[0], [150, 200]);
+    assert.equal(questionLayoutRef.current.x, Math.round((800 - questionLayoutRef.current.width) / 2));
+});
+
+test('reopened answers retain their recorded paper and image placement', () => {
+    const saved = {
+        canvasWidth: 1392, canvasHeight: 984,
+        questionLayout: { x: 369, y: 36, width: 654, height: 480 },
+        strokes: [{ points: [[390, 100], [400, 110]], width: 6, color: '#f00', eraser: false }],
+        texts: [],
+    };
+    let imagePlacement, strokeEndpoint;
+    const bgCanvas = { getContext: () => ({ fillRect() {}, drawImage: (...args) => { imagePlacement = args; } }) };
+    const drawCanvas = { getContext: () => ({
+        clearRect() {}, beginPath() {}, moveTo() {},
+        lineTo: (...args) => { strokeEndpoint = args; }, stroke() {},
+    }) };
+    const questionLayoutRef = { current: undefined };
+    handler('initCanvas', {
+        bgCanvasRef: { current: bgCanvas }, drawCanvasRef: { current: drawCanvas }, questionLayoutRef,
+        paperOrientation: 'landscape', initialAnswerState: saved,
+        SIDE_MARGIN: 48, TOP_MARGIN: 36, BOTTOM_MARGIN: 48,
+        MIN_IMAGE_WIDTH: 600, MAX_IMAGE_WIDTH: 1400, MAX_IMAGE_HEIGHT: 900,
+        MIN_WRITING_HEIGHT: 420, PAPER_ASPECT_RATIO: 297 / 210,
+        historyRef: { current: [] }, strokesRef: { current: [] }, activeStrokeRef: { current: null },
+        textAnnotationsRef: { current: [] }, editingTextRef: { current: null },
+        setTextAnnotations() {}, setEditingText() {}, setCanUndo() {}, onCanUndoChange() {},
+        console: { log() {} },
+    }, answerAst)({ naturalWidth: 600, naturalHeight: 430 });
+    assert.deepEqual([bgCanvas.width, bgCanvas.height], [1392, 984]);
+    assert.deepEqual(imagePlacement.slice(1), [369, 36, 654, 480]);
+    assert.deepEqual(strokeEndpoint, [400, 110]);
+    assert.deepEqual(JSON.parse(JSON.stringify(questionLayoutRef.current)), saved.questionLayout);
+});
+
+test('older answers use their paper size to recover the cutout scale', () => {
+    const saved = { canvasWidth: 1392, canvasHeight: 984, strokes: [], texts: [] };
+    let imagePlacement;
+    const bgCanvas = { getContext: () => ({ fillRect() {}, drawImage: (...args) => { imagePlacement = args; } }) };
+    const drawCanvas = { getContext: () => ({ clearRect() {} }) };
+    handler('initCanvas', {
+        bgCanvasRef: { current: bgCanvas }, drawCanvasRef: { current: drawCanvas },
+        questionLayoutRef: { current: undefined }, paperOrientation: 'landscape', initialAnswerState: saved,
+        SIDE_MARGIN: 48, TOP_MARGIN: 36, BOTTOM_MARGIN: 48,
+        MIN_IMAGE_WIDTH: 600, MAX_IMAGE_WIDTH: 1400, MAX_IMAGE_HEIGHT: 900,
+        MIN_WRITING_HEIGHT: 420, PAPER_ASPECT_RATIO: 297 / 210,
+        historyRef: { current: [] }, strokesRef: { current: [] }, activeStrokeRef: { current: null },
+        textAnnotationsRef: { current: [] }, editingTextRef: { current: null },
+        setTextAnnotations() {}, setEditingText() {}, setCanUndo() {}, onCanUndoChange() {},
+        console: { log() {} },
+    }, answerAst)({ naturalWidth: 600, naturalHeight: 439 });
+    assert.deepEqual([bgCanvas.width, bgCanvas.height], [1392, 984]);
+    assert.equal(imagePlacement[4], 480);
+    assert.equal(imagePlacement[1], Math.round((1392 - imagePlacement[3]) / 2));
+});
+
+test('saved answer state includes the question placement', () => {
+    const layout = { x: 369, y: 36, width: 654, height: 480 };
+    const state = handler('getAnswerState', {
+        drawCanvasRef: { current: { width: 1392, height: 984 } },
+        questionLayoutRef: { current: layout },
+        strokesRef: { current: [] }, activeStrokeRef: { current: null },
+        textAnnotationsRef: { current: [] },
+    }, answerAst)();
+    assert.equal(state.questionLayout, layout);
 });
 
 test('finishing a pen or eraser stroke publishes its coordinates', () => {
@@ -234,15 +353,61 @@ test('saves the latest answer for a PDF range without a second image', async () 
     });
     const first = { canvasWidth: 800, canvasHeight: 1200, strokes: [], texts: [] };
     const second = { ...first, strokes: [{ points: [[1, 1], [2, 2]], width: 5, color: '#000', eraser: false }] };
-    run('first', first);
-    run('first', second);
-    run('second', { ...first, texts: [{ id: 'other', text: '別の解答' }] });
+    run('first', 'first', first);
+    run('first', 'first', second);
+    run('second', 'second', { ...first, texts: [{ id: 'other', text: '別の解答' }] });
     await Promise.all([pending.get('first'), pending.get('second')]);
     assert.equal(markers.get('first').answer.strokes.length, 1);
     assert.equal(markers.get('first').answer.texts.length, 0);
     assert.equal(markers.get('second').answer.strokes.length, 0);
     assert.equal(markers.get('second').answer.texts[0].text, '別の解答');
     assert.equal(JSON.stringify(markers.get('first')).includes('data:image'), false);
+});
+
+test('saves a follow-up answer without replacing its parent answer', async () => {
+    const parentAnswer = { canvasWidth: 800, canvasHeight: 1200, strokes: [], texts: [] };
+    let marker = {
+        id: 'root', pdfId: 'book', regions: [], sourcePageNumbers: [1], answer: parentAnswer,
+        followUps: [{ id: 'child', parentId: 'root', region: { x: 0, y: 0, width: 1, height: 1 } }],
+    };
+    const pending = new Map();
+    const run = handler('saveStudyAnswer', {
+        pendingAnswerWritesRef: { current: pending },
+        getPDFStudyMarker: async () => marker,
+        savePDFStudyMarker: async value => { marker = value; },
+        addStatusMessage() {}, console,
+    });
+    const childAnswer = { ...parentAnswer, strokes: [{ points: [[10, 20], [30, 40]], width: 3 }] };
+    run('root', 'child', childAnswer);
+    await pending.get('root');
+    assert.equal(marker.answer, parentAnswer);
+    assert.equal(marker.followUps[0].answer, childAnswer);
+});
+
+test('restores a single follow-up path and stops at the first branch', async () => {
+    const grading = { result: { problems: [] }, modelName: null, responseTime: 1 };
+    const trace = {
+        id: 'root', sourcePageNumbers: [2],
+        followUps: [
+            { id: 'first', parentId: 'root', grading },
+            { id: 'second', parentId: 'first', grading },
+            { id: 'branch-a', parentId: 'second' },
+            { id: 'branch-b', parentId: 'second' },
+        ],
+    };
+    const panels = [
+        { type: 'pdf' }, { type: 'answer', traceId: 'root', nodeId: 'root' },
+        { type: 'grading', traceId: 'root', nodeId: 'root' },
+    ];
+    const run = handler('appendFollowUpPath', {
+        loadFollowUpQuestionImage: async (_, id) => `image:${id}`,
+    });
+    await run(trace, panels, 'landscape');
+    assert.deepEqual(panels.map(panel => panel.nodeId), [undefined, 'root', 'root', 'first', 'first', 'second', 'second']);
+    assert.equal(panels.at(-1).type, 'grading');
+    await run(trace, panels, 'landscape', 'branch-b');
+    assert.equal(panels.at(-1).type, 'answer');
+    assert.equal(panels.at(-1).questionImage, 'image:branch-b');
 });
 
 test('confirming a PDF range stores coordinates without storing the cropped image', async () => {
@@ -252,6 +417,7 @@ test('confirming a PDF range stores coordinates without storing the cropped imag
         captureSelectionArea: async () => ({
             image: 'data:image/png;base64,temporary', sourcePageNumbers: [2],
             regions: [{ pageNumber: 2, x: 0.1, y: 0.2, width: 0.3, height: 0.4 }],
+            captureLayout: { width: 100, height: 100, regions: [{ x: 0, y: 0, width: 100, height: 100 }] },
         }),
         crypto: { randomUUID: () => 'range' }, pdfId: 'book',
         savePDFStudyMarker: async value => saved.push(value),
@@ -261,6 +427,7 @@ test('confirming a PDF range stores coordinates without storing the cropped imag
     await run();
     assert.equal(saved.length, 1);
     assert.deepEqual(Array.from(saved[0].regions, region => region.pageNumber), [2]);
+    assert.equal(saved[0].captureLayout.width, 100);
     assert.equal(JSON.stringify(saved[0]).includes('temporary'), false);
     assert.equal(panels[0].questionImage, 'data:image/png;base64,temporary');
 });
@@ -299,6 +466,45 @@ test('history and grading panels retain captured pages despite later PDF navigat
     assert.equal(traces[0].grading.result.problems[0].problemNumber, '1');
 });
 
+test('a follow-up asks the tutor without grading or adding grading history', async () => {
+    const rootGrading = { result: { problems: [{ problemNumber: 'root' }] }, modelName: null, responseTime: 1 };
+    let marker = {
+        id: 'root', pdfId: 'book', regions: [], sourcePageNumbers: [2], grading: rootGrading,
+        followUps: [{ id: 'child', parentId: 'root', region: { x: 0, y: 0, width: 1, height: 1 } }],
+    };
+    const panels = [];
+    const requests = [];
+    const noop = () => {};
+    const run = handler('confirmAndGrade', {
+        setIsGrading: noop, setGradingError: noop, addStatusMessage: noop,
+        panelStack: [
+            { type: 'grading', result: rootGrading.result },
+            { type: 'answer', source: 'grading', traceId: 'root', nodeId: 'child', paperOrientation: 'landscape' },
+        ],
+        activePanelIndex: 1, pendingAnswerWritesRef: { current: new Map() },
+        getPDFStudyMarker: async () => marker,
+        savePDFStudyMarker: async value => { marker = value; }, setStudyTraces: noop,
+        compressImageDataUrl: async value => value,
+        Image: class { width = 100; height = 100; set src(_) { queueMicrotask(() => this.onload()); } },
+        selectedModel: 'default', i18n: { language: 'ja' },
+        gradeWork: async () => { throw new Error('a question must not be graded'); },
+        askQuestion: async (image, context) => {
+            requests.push({ image, context });
+            return { success: true, result: { pageType: 'follow-up-question', problems: [], overallComment: 'follow-up' } };
+        },
+        pushPanel: value => panels.push(value), pdfId: 'book',
+        saveGradingImage: async () => { throw new Error('a question must not enter grading history'); },
+        console,
+    });
+    await run('image', [2]);
+    assert.equal(marker.grading, rootGrading);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].context, rootGrading.result);
+    assert.equal(marker.followUps[0].grading.result.overallComment, 'follow-up');
+    assert.equal(marker.followUps[0].grading.result.pageType, 'follow-up-question');
+    assert.equal(panels[0].nodeId, 'child');
+});
+
 test('a graded PDF mark restores the answer sheet before its grading result', async () => {
     let panels, activeIndex;
     const answer = { canvasWidth: 800, canvasHeight: 1200, strokes: [{ points: [[1, 2]] }], texts: [] };
@@ -312,6 +518,8 @@ test('a graded PDF mark restores the answer sheet before its grading result', as
             grading: { result: { problems: [] }, modelName: null, responseTime: 1 },
         }),
         recreateQuestionImage: async () => 'data:image/png;base64,recreated',
+        appendFollowUpPath: async () => {},
+        setStudyTraces() {},
         setPanelStack: value => { panels = value; },
         setActivePanelIndex: value => { activeIndex = value; },
         setIsSelectionMode() {}, setIsGradingCaptureMode() {}, setSelectionRect() {},
@@ -324,7 +532,7 @@ test('a graded PDF mark restores the answer sheet before its grading result', as
     assert.equal(panels[1].questionImage, 'data:image/png;base64,recreated');
     assert.equal(panels[1].answerState, answer);
     assert.equal(panels[2].result.problems.length, 0);
-    assert.equal(activeIndex, 1);
+    assert.equal(activeIndex, 2);
 });
 
 test('an ungraded PDF mark opens its saved answer', async () => {
@@ -337,6 +545,7 @@ test('an ungraded PDF mark opens its saved answer', async () => {
         }),
         getPDFPageOrientation: async () => 'portrait',
         recreateQuestionImage: async () => 'data:image/png;base64,recreated',
+        setStudyTraces() {},
         setPanelStack: value => { panels = value; }, setActivePanelIndex() {},
         setIsSelectionMode() {}, setIsGradingCaptureMode() {}, setSelectionRect() {},
         addStatusMessage() {}, console,
@@ -344,6 +553,29 @@ test('an ungraded PDF mark opens its saved answer', async () => {
     await run('trace');
     assert.equal(panels[1].type, 'answer');
     assert.equal(panels[1].answerState, answer);
+});
+
+test('returning to PDF activates range selection instead of leaving no tool active', () => {
+    const modeChanges = [];
+    const run = handler('navigateToPanel', {
+        panelStack: [{ type: 'pdf' }, { type: 'answer' }],
+        setIsSelectionMode: value => modeChanges.push(['selection', value]),
+        setIsDrawingMode: value => modeChanges.push(['pen', value]),
+        setIsEraserMode: value => modeChanges.push(['eraser', value]),
+        setIsTextMode: value => modeChanges.push(['text', value]),
+        setSelectionRect: value => modeChanges.push(['rect', value]),
+        setIsHoveringStudyTrace: value => modeChanges.push(['hover', value]),
+        cancelGradingCapture: () => modeChanges.push(['grading', false]),
+        setActivePanelIndex: value => modeChanges.push(['panel', value]),
+    });
+    run(0);
+    assert.deepEqual(modeChanges, [
+        ['selection', true], ['pen', false], ['eraser', false], ['text', false],
+        ['rect', null], ['hover', false], ['grading', false], ['panel', 0],
+    ]);
+    modeChanges.length = 0;
+    run(1);
+    assert.deepEqual(modeChanges, [['panel', 1]]);
 });
 
 test('answer export preserves the selected answer source across async panel navigation', async () => {

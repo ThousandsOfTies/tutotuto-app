@@ -92,24 +92,32 @@
   height: 18px;
 }
 
-.toolbar button.study-trace-delete-button {
+.study-trace-link-connector {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
   flex-shrink: 0;
-  gap: 6px;
-  padding: 0 10px;
+  color: #9b6863;
+  font-size: 13px;
+}
+
+.toolbar button.study-trace-unlink-button {
+  flex-shrink: 0;
+  width: 34px;
+  padding: 0;
+  border-radius: 50%;
   color: #a52a21;
   border-color: #e8c6c2;
   background: #fff8f7;
-  font-size: 12px;
 }
 
-.toolbar button.study-trace-delete-button:hover {
+.toolbar button.study-trace-unlink-button:hover {
   background: #ffeae7;
 }
 
-@media (max-width: 800px) {
-  .toolbar button.study-trace-delete-button span {
-    display: none;
-  }
+.toolbar button.study-trace-unlink-button svg {
+  width: 16px;
+  height: 16px;
 }
 
 .toolbar button:disabled {

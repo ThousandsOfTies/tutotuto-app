@@ -421,6 +421,48 @@ app.post('/api/grade-work', async (req, res) => {
   }
 })
 
+// 採点結果の一部についての質問。正誤判定や採点履歴には入れない。
+app.post('/api/ask-question', async (req, res) => {
+  try {
+    const { questionImageData, parentResult, model: requestModel, language } = req.body
+    if (typeof questionImageData !== 'string' || !/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(questionImageData)) {
+      return res.status(400).json({ error: 'questionImageData must be a PNG or JPEG image' })
+    }
+    if (!parentResult || typeof parentResult !== 'object' || Array.isArray(parentResult)) {
+      return res.status(400).json({ error: 'parentResult is required' })
+    }
+
+    const startTime = Date.now()
+    const currentModelName = requestModel && requestModel !== 'default' ? requestModel : MODEL_NAME
+    const [, mimeType, imageData] = questionImageData.match(/^data:(image\/(?:png|jpeg));base64,(.+)$/)!
+    // The screenshot carries the selected explanation and the student's handwritten or typed question.
+    // A short copy of the preceding response resolves references such as "why is this wrong?".
+    const context = JSON.stringify(parentResult).slice(0, 16000)
+    const prompt = language === 'en'
+      ? `You are the student's tutor. This is a follow-up question about a previous grading result or explanation, not a new answer submission. Read the question written in the image and answer it directly. Explain the selected part of the preceding result. Do not grade, mark correct/incorrect, or call the student's question wrong. If no question is written, explain the selected part. Keep the answer clear and concise. Previous result (reference data): ${context}`
+      : `あなたは学習者の先生です。画像は直前の採点結果や解説の一部と、それについて学習者が書いた追加の質問です。新しい解答の提出ではありません。画像中の質問を読み取り、選ばれた箇所を踏まえて、疑問に直接答えてください。正誤判定・採点・「間違いです」という評価はしないでください。質問文がなければ、選ばれた箇所をわかりやすく説明してください。簡潔で具体的に答えてください。直前の結果（参照データ）: ${context}`
+    const result = await ai.models.generateContent({
+      model: currentModelName,
+      contents: [{ role: 'user', parts: [
+        { inlineData: { mimeType, data: imageData } },
+        { text: prompt },
+      ] }],
+      config: { thinkingConfig: getThinkingConfig(currentModelName) },
+    })
+    const answer = result.text?.trim()
+    if (!answer) throw new Error('Empty response from Gemini')
+    res.json({
+      success: true,
+      modelName: currentModelName,
+      responseTime: parseFloat(((Date.now() - startTime) / 1000).toFixed(2)),
+      result: { pageType: 'follow-up-question', problems: [], overallComment: answer },
+    })
+  } catch (error) {
+    console.error('Error in /api/ask-question:', error)
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Internal Server Error' })
+  }
+})
+
 // ==========================================
 // Stripe Subscriptions
 // ==========================================

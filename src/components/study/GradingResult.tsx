@@ -1,8 +1,11 @@
 import { useTranslation } from 'react-i18next'
+import { lazy, Suspense, type ReactNode } from 'react'
 import { GradingResponseResult } from '@home-teacher/common/services/api'
 import { SNSLinkRecord } from '@home-teacher/common/utils/indexedDB'
 // import { getSNSIcon } from '@home-teacher/common/constants/sns'
 import './GradingResult.css'
+
+const QuestionAnswer = lazy(() => import('./QuestionAnswer'))
 
 interface GradingResultProps {
   result: GradingResponseResult | null
@@ -11,14 +14,16 @@ interface GradingResultProps {
   modelName?: string | null
   responseTime?: number | null
   pdfId?: string
+  studyMarkers?: ReactNode
 }
 
-const GradingResult = ({ result, snsLinks = [], timeLimitMinutes = 30, modelName, responseTime, pdfId }: GradingResultProps) => {
+const GradingResult = ({ result, snsLinks = [], timeLimitMinutes = 30, modelName, responseTime, pdfId, studyMarkers }: GradingResultProps) => {
   const { t } = useTranslation()
 
   const validProblems = result?.problems?.filter(problem =>
     problem.problemNumber !== null && problem.isCorrect !== null
   ) || []
+  const isQuestionResponse = result?.pageType === 'follow-up-question'
 
   const openSNSSelectionPage = () => {
     const returnUrlString = pdfId ? `./?pdfId=${encodeURIComponent(pdfId)}` : './'
@@ -30,7 +35,14 @@ const GradingResult = ({ result, snsLinks = [], timeLimitMinutes = 30, modelName
     <div className="grading-result-content">
       <div className="result-content">
         <div className="result-inner">
-          {result && validProblems.length > 0 ? (
+          {isQuestionResponse ? (
+            <div className="question-response">
+              <h3>先生の回答</h3>
+              <Suspense fallback={<p>回答を表示しています...</p>}>
+                <QuestionAnswer text={result?.overallComment || result?.rawResponse || ''} />
+              </Suspense>
+            </div>
+          ) : result && validProblems.length > 0 ? (
             <div className="problems-list">
               {validProblems.map((problem, index) => (
                 <div key={index} className={`problem-item ${problem.isCorrect ? 'correct' : 'incorrect'}`}>
@@ -104,7 +116,7 @@ const GradingResult = ({ result, snsLinks = [], timeLimitMinutes = 30, modelName
             </div>
           )}
 
-          {snsLinks.length > 0 && (
+          {!isQuestionResponse && snsLinks.length > 0 && (
             <div className="sns-links-section">
               <h3 style={{ fontSize: '16px', fontWeight: 'bold', color: '#2c3e50', marginBottom: '12px', textAlign: 'center' }}>Enjoy!</h3>
               <button
@@ -120,6 +132,7 @@ const GradingResult = ({ result, snsLinks = [], timeLimitMinutes = 30, modelName
               </button>
             </div>
           )}
+          {studyMarkers}
         </div>
       </div>
 

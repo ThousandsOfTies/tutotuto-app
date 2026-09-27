@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ICON_SVG } from '../../constants/icons';
-import { FiHome, FiRotateCcw, FiTrash2, FiCheckCircle, FiLoader, FiType, FiEdit2 } from 'react-icons/fi';
+import { FiHome, FiRotateCcw, FiX, FiCheckCircle, FiMessageCircle, FiLoader, FiType, FiEdit2 } from 'react-icons/fi';
 import { BiEraser, BiSelection } from 'react-icons/bi';
 
 export type TextDirection = 'horizontal' | 'vertical-rl' | 'vertical-lr';
@@ -58,6 +58,7 @@ interface StudyToolbarProps {
 
     // Answer panel actions (shown when on answer panel)
     onGrade?: () => void;
+    submissionKind?: 'grade' | 'ask';
     canUndoAnswer?: boolean;
     onUndoAnswer?: () => void;
     onClearAnswer?: () => void;
@@ -100,6 +101,7 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
     onClear,
     onClearAll,
     onGrade,
+    submissionKind = 'grade',
     canUndoAnswer,
     onUndoAnswer,
     onClearAnswer,
@@ -184,7 +186,21 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
                         }}>
                             {breadcrumbs.map((crumb, i) => (
                                 <React.Fragment key={i}>
-                                    {i > 0 && <span style={{ color: '#bbb', fontSize: '13px', flexShrink: 0 }}>›</span>}
+                                    {i > 0 && (i === 1 && onDeleteStudyTrace ? (
+                                        <span className="study-trace-link-connector">
+                                            <span aria-hidden="true">─</span>
+                                            <button
+                                                type="button"
+                                                className="study-trace-unlink-button"
+                                                onClick={onDeleteStudyTrace}
+                                                title="PDFからこの学習履歴へのリンクを削除"
+                                                aria-label="PDFからこの学習履歴へのリンクを削除"
+                                            >
+                                                <FiX size={16} />
+                                            </button>
+                                            <span aria-hidden="true">→</span>
+                                        </span>
+                                    ) : <span style={{ color: '#bbb', fontSize: '13px', flexShrink: 0 }}>›</span>)}
                                     <span
                                         onClick={crumb.isCurrent ? undefined : crumb.onClick}
                                         style={{
@@ -204,22 +220,6 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
                             ))}
                         </div>
                     )}
-
-                    {onDeleteStudyTrace && (
-                        <button
-                            type="button"
-                            className="study-trace-delete-button"
-                            onClick={onDeleteStudyTrace}
-                            title="この学習範囲の印を削除"
-                            aria-label="この学習範囲の印を削除"
-                        >
-                            <FiTrash2 size={18} />
-                            <span>印を削除</span>
-                        </button>
-                    )}
-
-
-
 
                 </>
             )}
@@ -416,14 +416,15 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
                                 onClick={onGrade}
                                 disabled={isGrading}
                                 className="btn-submit"
-                                title="採点する"
+                                title={submissionKind === 'ask' ? '先生に質問する' : '採点する'}
+                                aria-label={submissionKind === 'ask' ? '先生に質問する' : '採点する'}
                                 style={{
                                     cursor: isGrading ? 'wait' : 'pointer',
                                     opacity: isGrading ? 0.6 : 1,
                                     transition: 'all 0.15s',
                                 }}
                             >
-                                {isGrading ? <FiLoader size={20} className="animate-spin" /> : <FiCheckCircle size={20} />}
+                                {isGrading ? <FiLoader size={20} className="animate-spin" /> : submissionKind === 'ask' ? <FiMessageCircle size={20} /> : <FiCheckCircle size={20} />}
                             </button>
                         </>
                     ) : (

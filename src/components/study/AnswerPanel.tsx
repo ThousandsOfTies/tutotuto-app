@@ -112,6 +112,7 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
   const historyRef = useRef<AnswerSnapshot[]>([])
   const strokesRef = useRef<AnswerStroke[]>([])
   const activeStrokeRef = useRef<AnswerStroke | null>(null)
+  const questionLayoutRef = useRef<PDFStudyAnswerState['questionLayout']>(undefined)
   const textAnnotationsRef = useRef<AnswerText[]>([])
   const [textAnnotations, setTextAnnotations] = useState<AnswerText[]>([])
   const editingTextRef = useRef<{ x: number; y: number; id?: string; initialText: string } | null>(null)
@@ -145,24 +146,53 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
       MAX_IMAGE_WIDTH / img.naturalWidth,
       MAX_IMAGE_HEIGHT / img.naturalHeight,
     )
-    const imgW = Math.round(img.naturalWidth * displayScale)
-    const imgH = Math.round(img.naturalHeight * displayScale)
-    console.log('[AnswerPanel] initCanvas:', { naturalW: img.naturalWidth, naturalH: img.naturalHeight, displayScale, imgW, imgH })
-
-    const writingH = Math.max(MIN_WRITING_HEIGHT, Math.round(imgH * 0.7))
+    let imgW = Math.round(img.naturalWidth * displayScale)
+    let imgH = Math.round(img.naturalHeight * displayScale)
     const orientation = paperOrientation ?? (imgW > imgH ? 'landscape' : 'portrait')
-    const contentHeight = TOP_MARGIN + imgH + writingH + BOTTOM_MARGIN
-    const contentWidth = imgW + SIDE_MARGIN * 2
-    let w: number
-    let h: number
-    if (orientation === 'landscape') {
-      h = Math.max(800, contentHeight, Math.ceil(Math.max(1200, contentWidth) / PAPER_ASPECT_RATIO))
-      w = Math.ceil(h * PAPER_ASPECT_RATIO)
-    } else {
-      w = Math.max(800, contentWidth, Math.ceil(Math.max(1132, contentHeight) / PAPER_ASPECT_RATIO))
-      h = Math.ceil(w * PAPER_ASPECT_RATIO)
+    const paperSize = (imageWidth: number, imageHeight: number) => {
+      const writingH = Math.max(MIN_WRITING_HEIGHT, Math.round(imageHeight * 0.7))
+      const contentHeight = TOP_MARGIN + imageHeight + writingH + BOTTOM_MARGIN
+      const contentWidth = imageWidth + SIDE_MARGIN * 2
+      if (orientation === 'landscape') {
+        const height = Math.max(800, contentHeight, Math.ceil(Math.max(1200, contentWidth) / PAPER_ASPECT_RATIO))
+        return { w: Math.ceil(height * PAPER_ASPECT_RATIO), h: height }
+      }
+      const width = Math.max(800, contentWidth, Math.ceil(Math.max(1132, contentHeight) / PAPER_ASPECT_RATIO))
+      return { w: width, h: Math.ceil(width * PAPER_ASPECT_RATIO) }
     }
-    const imageLeft = Math.round((w - imgW) / 2)  // 常に水平中央
+
+    const saved = initialAnswerState
+    const hasSavedPaper = saved && saved.canvasWidth > 0 && saved.canvasHeight > 0
+    const savedLayout = saved?.questionLayout
+    const hasSavedLayout = savedLayout && savedLayout.width > 0 && savedLayout.height > 0 &&
+      [savedLayout.x, savedLayout.y, savedLayout.width, savedLayout.height].every(Number.isFinite)
+    if (hasSavedLayout) {
+      imgW = savedLayout.width
+      imgH = savedLayout.height
+    } else if (hasSavedPaper) {
+      // Older histories recorded the paper size but omitted image placement.
+      // Recover the former display size where the paper dimensions constrain it.
+      const ratio = img.naturalWidth / img.naturalHeight
+      let best: { width: number; height: number; difference: number } | undefined
+      for (let height = 1; height <= MAX_IMAGE_HEIGHT; height++) {
+        const expectedWidth = Math.round(height * ratio)
+        for (let width = Math.max(1, expectedWidth - 2); width <= Math.min(MAX_IMAGE_WIDTH, expectedWidth + 2); width++) {
+          const candidate = paperSize(width, height)
+          if (candidate.w !== saved.canvasWidth || candidate.h !== saved.canvasHeight) continue
+          const difference = Math.abs(width - imgW) + Math.abs(height - imgH)
+          if (!best || difference < best.difference) best = { width, height, difference }
+        }
+      }
+      if (best) {
+        imgW = best.width
+        imgH = best.height
+      }
+    }
+    const { w, h } = hasSavedPaper ? { w: saved.canvasWidth, h: saved.canvasHeight } : paperSize(imgW, imgH)
+    const imageLeft = hasSavedLayout ? savedLayout.x : Math.round((w - imgW) / 2)
+    const imageTop = hasSavedLayout ? savedLayout.y : TOP_MARGIN
+    questionLayoutRef.current = { x: imageLeft, y: imageTop, width: imgW, height: imgH }
+    console.log('[AnswerPanel] initCanvas:', { naturalW: img.naturalWidth, naturalH: img.naturalHeight, displayScale, imgW, imgH })
 
     bgCanvas.width = w
     bgCanvas.height = h
@@ -177,7 +207,7 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
     ctx.fillRect(0, 0, w, h)
 
     // Question image
-    ctx.drawImage(img, imageLeft, TOP_MARGIN, imgW, imgH)
+    ctx.drawImage(img, imageLeft, imageTop, imgW, imgH)
 
 
     // Clear draw canvas (fully transparent)
@@ -187,7 +217,6 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
     historyRef.current = []
     strokesRef.current = []
     activeStrokeRef.current = null
-    const saved = initialAnswerState
     let restoredTexts: AnswerText[] = []
     if (saved && saved.canvasWidth > 0 && saved.canvasHeight > 0) {
       const scaleX = w / saved.canvasWidth
@@ -270,6 +299,7 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
     return {
       canvasWidth: canvas.width,
       canvasHeight: canvas.height,
+      questionLayout: questionLayoutRef.current,
       strokes: activeStroke && activeStroke.points.length > 1
         ? [...strokesRef.current, activeStroke]
         : strokesRef.current,

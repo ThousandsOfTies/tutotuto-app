@@ -2,11 +2,11 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { DEFAULT_MODEL_ID } from '@home-teacher/common/constants/grading'
-import { GradingResponseResult, getAvailableModels, gradeWork, ModelInfo } from '@home-teacher/common/services/api'
+import { GradingResponseResult, getAvailableModels, gradeWork, askQuestion, ModelInfo } from '@home-teacher/common/services/api'
 import GradingResult from './GradingResult'
 import AnswerPanel, { AnswerPanelHandle } from './AnswerPanel'
 import VoiceTextEditor from './VoiceTextEditor'
-import { deleteAllDrawings, flushDrawingSaves, getAllDrawings, getPDFRecord, updatePDFRecord, getAllSNSLinks, SNSLinkRecord, PDFFileRecord, saveGradingHistory, generateGradingHistoryId, saveGradingImage, scheduleDrawingSave, saveTextAnnotation, PDFStudyAnswerState, PDFStudyRegion, PDFStudyMarkerRecord, savePDFStudyMarker, getPDFStudyMarker, getPDFStudyMarkersByPdfId, deletePDFStudyMarker } from '@home-teacher/common/utils/indexedDB'
+import { deleteAllDrawings, flushDrawingSaves, getAllDrawings, getPDFRecord, updatePDFRecord, getAllSNSLinks, SNSLinkRecord, PDFFileRecord, saveGradingHistory, generateGradingHistoryId, saveGradingImage, scheduleDrawingSave, saveTextAnnotation, PDFStudyAnswerState, PDFStudyRegion, PDFStudyMarkerRecord, PDFStudyFollowUp, savePDFStudyMarker, getPDFStudyMarker, getPDFStudyMarkersByPdfId, deletePDFStudyMarker, appendPDFStudyFollowUp, getPDFStudyAsset } from '@home-teacher/common/utils/indexedDB'
 import { ICON_SVG } from '../../constants/icons'
 import { DrawingPath } from '@thousands-of-ties/drawing-common'
 import { PDFPane, PDFPaneHandle } from '@home-teacher/common/components/study/PDFPane'
@@ -38,10 +38,33 @@ const SPLIT_RATIO_STORAGE_KEY = 'tutotuto.splitRatio'
 
 type PaperOrientation = 'portrait' | 'landscape'
 
+const getGradingCaptureGeometry = (
+  selection: { x: number; y: number; width: number; height: number },
+  panelRect: Pick<DOMRect, 'left' | 'top'>,
+  innerRect: Pick<DOMRect, 'left' | 'top' | 'width' | 'height'>,
+) => {
+  const innerX = innerRect.left - panelRect.left
+  const innerY = innerRect.top - panelRect.top
+  const x = Math.max(selection.x, innerX)
+  const y = Math.max(selection.y, innerY)
+  const width = Math.min(selection.x + selection.width, innerX + innerRect.width) - x
+  const height = Math.min(selection.y + selection.height, innerY + innerRect.height) - y
+  if (width < 10 || height < 10) return null
+  return {
+    x, y, width, height,
+    region: {
+      x: (x - innerX) / innerRect.width,
+      y: (y - innerY) / innerRect.height,
+      width: width / innerRect.width,
+      height: height / innerRect.height,
+    },
+  }
+}
+
 type PanelData =
   | { type: 'pdf' }
-  | { type: 'answer'; questionImage: string; sourcePageNumbers: number[]; paperOrientation?: PaperOrientation; answerState?: PDFStudyAnswerState; source?: 'grading'; traceId?: string }
-  | { type: 'grading'; result: GradingResponseResult; modelName: string | null; responseTime: number | null; sourcePageNumbers: number[]; paperOrientation?: PaperOrientation; traceId?: string }
+  | { type: 'answer'; questionImage: string; sourcePageNumbers: number[]; paperOrientation?: PaperOrientation; answerState?: PDFStudyAnswerState; source?: 'grading'; traceId?: string; nodeId?: string }
+  | { type: 'grading'; result: GradingResponseResult; modelName: string | null; responseTime: number | null; sourcePageNumbers: number[]; paperOrientation?: PaperOrientation; traceId?: string; nodeId?: string }
 
 const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
   const { t, i18n } = useTranslation()
@@ -278,7 +301,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
     switch (panel.type) {
       case 'pdf': return 'PDF'
       case 'answer': return panel.source === 'grading' ? '質問記入' : '解答記入'
-      case 'grading': return '採点結果'
+      case 'grading': return panel.result.pageType === 'follow-up-question' ? '質問への回答' : '採点結果'
     }
   }
 
@@ -287,12 +310,20 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
     setActivePanelIndex(prev => prev + 1)
   }
 
-  const saveStudyAnswer = (traceId: string, answer: PDFStudyAnswerState) => {
+  const saveStudyAnswer = (traceId: string, nodeId: string | undefined, answer: PDFStudyAnswerState) => {
     const previous = pendingAnswerWritesRef.current.get(traceId) ?? Promise.resolve()
     const next = previous.catch(() => {}).then(async () => {
       const trace = await getPDFStudyMarker(traceId)
       if (!trace) return
-      await savePDFStudyMarker({ ...trace, answer })
+      if (nodeId && nodeId !== traceId) {
+        if (!trace.followUps?.some(item => item.id === nodeId)) throw new Error('追加の質問が見つかりません')
+        await savePDFStudyMarker({
+          ...trace,
+          followUps: trace.followUps.map(item => item.id === nodeId ? { ...item, answer } : item),
+        })
+      } else {
+        await savePDFStudyMarker({ ...trace, answer })
+      }
     })
     pendingAnswerWritesRef.current.set(traceId, next)
     void next.catch(error => {
@@ -315,7 +346,10 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
     }
   }
 
-  const recreateQuestionImage = async (regions: PDFStudyRegion[]): Promise<string> => {
+  const recreateQuestionImage = async (
+    regions: PDFStudyRegion[],
+    captureLayout?: PDFStudyMarkerRecord['captureLayout'],
+  ): Promise<string> => {
     if (!pdfDoc || regions.length === 0) throw new Error('PDFを開けません')
     const crops: HTMLCanvasElement[] = []
     for (const region of regions) {
@@ -339,18 +373,79 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       crops.push(crop)
     }
     const result = document.createElement('canvas')
-    result.width = Math.max(...crops.map(crop => crop.width))
-    result.height = crops.reduce((sum, crop) => sum + crop.height, 0)
+    const useCaptureLayout = captureLayout &&
+      captureLayout.width > 0 && captureLayout.height > 0 &&
+      captureLayout.regions.length === crops.length &&
+      captureLayout.regions.every(region => region.width > 0 && region.height > 0)
+    result.width = useCaptureLayout ? captureLayout.width : Math.max(...crops.map(crop => crop.width))
+    result.height = useCaptureLayout ? captureLayout.height : crops.reduce((sum, crop) => sum + crop.height, 0)
     const context = result.getContext('2d')
     if (!context) throw new Error('問題画像を作成できません')
     context.fillStyle = '#ffffff'
     context.fillRect(0, 0, result.width, result.height)
     let y = 0
-    for (const crop of crops) {
-      context.drawImage(crop, 0, y)
-      y += crop.height
+    for (const [index, crop] of crops.entries()) {
+      if (useCaptureLayout) {
+        const placement = captureLayout.regions[index]
+        context.drawImage(crop, placement.x, placement.y, placement.width, placement.height)
+      } else {
+        context.drawImage(crop, 0, y)
+        y += crop.height
+      }
     }
     return result.toDataURL('image/png')
+  }
+
+  const loadFollowUpQuestionImage = async (traceId: string, nodeId: string): Promise<string> => {
+    const blob = await getPDFStudyAsset(traceId, nodeId, 'question')
+    if (!blob) throw new Error('追加の質問画像が見つかりません')
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result as string)
+      reader.onerror = () => reject(new Error('追加の質問画像を開けません'))
+      reader.readAsDataURL(blob)
+    })
+  }
+
+  const appendFollowUpPath = async (
+    trace: PDFStudyMarkerRecord,
+    panels: PanelData[],
+    paperOrientation?: PaperOrientation,
+    chosenId?: string,
+  ) => {
+    const visited = new Set<string>()
+    let nextId = chosenId
+    while (panels[panels.length - 1]?.type === 'grading') {
+      const parent = panels[panels.length - 1]
+      const parentId = parent.type === 'grading' ? parent.nodeId ?? trace.id : trace.id
+      const children = (trace.followUps ?? []).filter(item => item.parentId === parentId)
+      const child = nextId ? children.find(item => item.id === nextId) : children.length === 1 ? children[0] : undefined
+      if (!child) {
+        if (nextId) throw new Error('選択した質問が見つかりません')
+        break
+      }
+      if (visited.has(child.id)) throw new Error('質問履歴の接続が不正です')
+      visited.add(child.id)
+      panels.push({
+        type: 'answer',
+        questionImage: await loadFollowUpQuestionImage(trace.id, child.id),
+        sourcePageNumbers: trace.sourcePageNumbers,
+        paperOrientation,
+        source: 'grading',
+        answerState: child.answer,
+        traceId: trace.id,
+        nodeId: child.id,
+      })
+      if (!child.grading) break
+      panels.push({
+        type: 'grading', ...child.grading,
+        sourcePageNumbers: trace.sourcePageNumbers,
+        paperOrientation,
+        traceId: trace.id,
+        nodeId: child.id,
+      })
+      nextId = undefined
+    }
   }
 
   const openStudyTrace = async (traceId: string) => {
@@ -358,27 +453,55 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       await pendingAnswerWritesRef.current.get(traceId)?.catch(() => {})
       const trace = await getPDFStudyMarker(traceId)
       if (!trace || trace.pdfId !== pdfId) throw new Error('学習範囲が見つかりません')
+      setStudyTraces(previous => previous.map(item => item.id === traceId ? trace : item))
       const paperOrientation = await getPDFPageOrientation(trace.sourcePageNumbers[0])
       const answerPanel: PanelData = {
         type: 'answer',
-        questionImage: await recreateQuestionImage(trace.regions),
+        questionImage: await recreateQuestionImage(trace.regions, trace.captureLayout),
         sourcePageNumbers: trace.sourcePageNumbers,
         paperOrientation,
         answerState: trace.answer,
         traceId,
+        nodeId: traceId,
       }
       const panels: PanelData[] = [{ type: 'pdf' }, answerPanel]
       if (trace.grading) {
-        panels.push({ type: 'grading', ...trace.grading, sourcePageNumbers: trace.sourcePageNumbers, paperOrientation, traceId })
+        panels.push({ type: 'grading', ...trace.grading, sourcePageNumbers: trace.sourcePageNumbers, paperOrientation, traceId, nodeId: traceId })
+        try {
+          await appendFollowUpPath(trace, panels, paperOrientation)
+        } catch (error) {
+          console.error('追加の質問を復元できませんでした:', error)
+          addStatusMessage('⚠️ 追加の質問の一部を復元できませんでした')
+        }
       }
       setPanelStack(panels)
-      setActivePanelIndex(1)
+      setActivePanelIndex(panels.length - 1)
       setIsSelectionMode(false)
       setIsGradingCaptureMode(false)
       setSelectionRect(null)
     } catch (error) {
       console.error('学習範囲を開けませんでした:', error)
       addStatusMessage('❌ 学習範囲を開けませんでした')
+    }
+  }
+
+  const openStudyFollowUp = async (nodeId: string) => {
+    const sourcePanel = panelStack[activePanelIndex]
+    if (sourcePanel?.type !== 'grading' || !sourcePanel.traceId) return
+    try {
+      await pendingAnswerWritesRef.current.get(sourcePanel.traceId)?.catch(() => {})
+      const trace = await getPDFStudyMarker(sourcePanel.traceId)
+      if (!trace || trace.pdfId !== pdfId) throw new Error('学習範囲が見つかりません')
+      setStudyTraces(previous => previous.map(item => item.id === trace.id ? trace : item))
+      const panels = panelStack.slice(0, activePanelIndex + 1)
+      await appendFollowUpPath(trace, panels, sourcePanel.paperOrientation, nodeId)
+      setPanelStack(panels)
+      setActivePanelIndex(panels.length - 1)
+      cancelGradingCapture()
+      setIsHoveringStudyTrace(false)
+    } catch (error) {
+      console.error('追加の質問を開けませんでした:', error)
+      addStatusMessage('❌ 追加の質問を開けませんでした')
     }
   }
 
@@ -619,11 +742,12 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
           pdfId,
           createdAt: Date.now(),
           regions: capturedImage.regions,
+          captureLayout: capturedImage.captureLayout,
           sourcePageNumbers: capturedImage.sourcePageNumbers,
         }
         await savePDFStudyMarker(trace)
         setStudyTraces(previous => [...previous, trace])
-        pushPanel({ type: 'answer', questionImage: capturedImage.image, sourcePageNumbers: capturedImage.sourcePageNumbers, paperOrientation: capturedImage.paperOrientation, traceId: trace.id })
+        pushPanel({ type: 'answer', questionImage: capturedImage.image, sourcePageNumbers: capturedImage.sourcePageNumbers, paperOrientation: capturedImage.paperOrientation, traceId: trace.id, nodeId: trace.id })
         setIsSelectionMode(false)
         setSelectionRect(null)
       } else {
@@ -640,6 +764,15 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
   // 採点結果パネル用の範囲選択ハンドラ
   const handleGradingCaptureStart = (e: React.MouseEvent) => {
     if (e.button !== 0) return
+    const followUpId = document.elementsFromPoint(e.clientX, e.clientY)
+      .find(element => element.hasAttribute('data-study-followup-id'))
+      ?.getAttribute('data-study-followup-id')
+    if (followUpId) {
+      e.preventDefault()
+      isGradingCapturingRef.current = false
+      void openStudyFollowUp(followUpId)
+      return
+    }
     const rect = gradingPanelRef.current?.getBoundingClientRect()
     if (!rect) return
     const x = e.clientX - rect.left
@@ -682,11 +815,20 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
     try {
       const html2canvas = (await import('html2canvas')).default
       const panel = gradingPanelRef.current
+      const resultInner = panel.querySelector('.result-inner') as HTMLElement | null
+      if (!resultInner) throw new Error('採点結果の表示領域が見つかりません')
+      const panelRect = panel.getBoundingClientRect()
+      const innerRect = resultInner.getBoundingClientRect()
+      const geometry = getGradingCaptureGeometry(captureRect, panelRect, innerRect)
+      if (!geometry) throw new Error('採点結果の内側を選択してください')
       const overlay = panel.querySelector('.grading-capture-overlay') as HTMLElement | null
+      const markers = panel.querySelector('.grading-study-markers') as HTMLElement | null
       const previousDisplay = overlay?.style.display
+      const previousMarkerDisplay = markers?.style.display
       let fullCanvas: HTMLCanvasElement
       try {
         if (overlay) overlay.style.display = 'none'
+        if (markers) markers.style.display = 'none'
         fullCanvas = await html2canvas(panel, {
           scale: window.devicePixelRatio || 2,
           useCORS: true,
@@ -696,17 +838,19 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
         })
       } finally {
         if (overlay) overlay.style.display = previousDisplay || ''
+        if (markers) markers.style.display = previousMarkerDisplay || ''
       }
 
-      const dpr = window.devicePixelRatio || 2
+      const scaleX = fullCanvas.width / panel.clientWidth
+      const scaleY = fullCanvas.height / panel.clientHeight
       const cropCanvas = document.createElement('canvas')
-      cropCanvas.width = Math.round(captureRect.width * dpr)
-      cropCanvas.height = Math.round(captureRect.height * dpr)
+      cropCanvas.width = Math.round(geometry.width * scaleX)
+      cropCanvas.height = Math.round(geometry.height * scaleY)
       const ctx = cropCanvas.getContext('2d')!
       ctx.drawImage(
         fullCanvas,
-        captureRect.x * dpr,
-        captureRect.y * dpr,
+        geometry.x * scaleX,
+        geometry.y * scaleY,
         cropCanvas.width,
         cropCanvas.height,
         0, 0,
@@ -715,13 +859,33 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       )
 
       const capturedImage = cropCanvas.toDataURL('image/png')
-      pushPanel({ type: 'answer', questionImage: capturedImage, sourcePageNumbers: sourcePanel.sourcePageNumbers, paperOrientation: sourcePanel.paperOrientation ?? await getPDFPageOrientation(sourcePanel.sourcePageNumbers[0]), source: 'grading' })
+      let nodeId: string | undefined
+      if (sourcePanel.traceId) {
+        const questionBlob = await new Promise<Blob>((resolve, reject) => {
+          cropCanvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('質問画像を保存できません')), 'image/png')
+        })
+        nodeId = `followup_${crypto.randomUUID()}`
+        const followUp: PDFStudyFollowUp = {
+          id: nodeId,
+          parentId: sourcePanel.nodeId ?? sourcePanel.traceId,
+          region: geometry.region,
+        }
+        await pendingAnswerWritesRef.current.get(sourcePanel.traceId)?.catch(() => {})
+        const updated = await appendPDFStudyFollowUp(sourcePanel.traceId, followUp, questionBlob)
+        setStudyTraces(previous => previous.map(item => item.id === updated.id ? updated : item))
+      }
+      pushPanel({
+        type: 'answer', questionImage: capturedImage,
+        sourcePageNumbers: sourcePanel.sourcePageNumbers,
+        paperOrientation: sourcePanel.paperOrientation ?? await getPDFPageOrientation(sourcePanel.sourcePageNumbers[0]),
+        source: 'grading', traceId: sourcePanel.traceId, nodeId,
+      })
       setIsGradingCaptureMode(false)
       gradingCaptureRectRef.current = null
       setGradingCaptureRect(null)
     } catch (error) {
       console.error('Grading capture error:', error)
-      addStatusMessage('❌ キャプチャに失敗しました')
+      addStatusMessage('❌ 追加の質問を作成・保存できませんでした')
       gradingCaptureRectRef.current = null
       setGradingCaptureRect(null)
     }
@@ -745,6 +909,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
     if (!ctx) return null
     const sourcePageNumbers: number[] = []
     const regions: PDFStudyRegion[] = []
+    const captureRegions: NonNullable<PDFStudyMarkerRecord['captureLayout']>['regions'] = []
     let paperOrientation: PaperOrientation | undefined
 
     // ペインからキャプチャするヘルパー
@@ -795,6 +960,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
         width: intersectW / canvasRect.width,
         height: intersectH / canvasRect.height,
       })
+      captureRegions.push({ x: dx, y: dy, width: intersectW, height: intersectH })
     }
 
     if (activeTab === 'A' || isSplitView) {
@@ -805,7 +971,10 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       captureFromPane(paneBRef, 'pane-b', pageB)
     }
 
-    return sourcePageNumbers.length ? { image: tempCanvas.toDataURL('image/png'), sourcePageNumbers, regions, paperOrientation } : null
+    return sourcePageNumbers.length ? {
+      image: tempCanvas.toDataURL('image/png'), sourcePageNumbers, regions, paperOrientation,
+      captureLayout: { width: tempCanvas.width, height: tempCanvas.height, regions: captureRegions },
+    } : null
   }
 
 
@@ -862,6 +1031,8 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
     setGradingError(null)
     const answerPanel = panelStack[activePanelIndex]
     const traceId = answerPanel?.type === 'answer' ? answerPanel.traceId : undefined
+    const nodeId = answerPanel?.type === 'answer' ? answerPanel.nodeId : undefined
+    const isFollowUpQuestion = answerPanel?.type === 'answer' && answerPanel.source === 'grading'
 
     try {
       const croppedImageData = await compressImageDataUrl(compositeImage, 2048)
@@ -886,20 +1057,23 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
         }
       })
 
-      // APIに送信（簡素化：切り抜き画像のみ）
-      addStatusMessage('🎯 AI採点中...')
+      // 採点結果からの追加質問には採点プロンプトを使わない。
+      const parentPanel = panelStack[activePanelIndex - 1]
+      if (isFollowUpQuestion && parentPanel?.type !== 'grading') {
+        throw new Error('質問元の採点結果が見つかりません')
+      }
+      addStatusMessage(isFollowUpQuestion ? '💬 AIが質問に回答中...' : '🎯 AI採点中...')
       const startTime = Date.now()
-      const response = await gradeWork(
-        croppedImageData,
-        selectedModel !== 'default' ? selectedModel : undefined,
-        i18n.language
-      )
+      const model = selectedModel !== 'default' ? selectedModel : undefined
+      const response = isFollowUpQuestion && parentPanel.type === 'grading'
+        ? await askQuestion(croppedImageData, parentPanel.result, model, i18n.language)
+        : await gradeWork(croppedImageData, model, i18n.language)
       const endTime = Date.now()
       const clientResponseTimeSeconds = parseFloat(((endTime - startTime) / 1000).toFixed(1))
 
       if (!response.success) {
-        setGradingError(response.error || "採点に失敗しました")
-        throw new Error(response.error || "採点に失敗しました")
+        setGradingError(response.error || (isFollowUpQuestion ? '質問への回答に失敗しました' : '採点に失敗しました'))
+        throw new Error(response.error || (isFollowUpQuestion ? '質問への回答に失敗しました' : '採点に失敗しました'))
       }
 
       setGradingError(null)
@@ -919,14 +1093,17 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
           await pendingAnswerWritesRef.current.get(traceId)
           const trace = await getPDFStudyMarker(traceId)
           if (!trace) throw new Error('学習範囲が見つかりません')
-          const updated = {
-            ...trace,
-            grading: {
-              result: gradingResult,
-              modelName: response.modelName ?? null,
-              responseTime: response.responseTime ?? clientResponseTimeSeconds,
-            },
+          const grading = {
+            result: gradingResult,
+            modelName: response.modelName ?? null,
+            responseTime: response.responseTime ?? clientResponseTimeSeconds,
           }
+          if (nodeId && nodeId !== traceId && !trace.followUps?.some(item => item.id === nodeId)) {
+            throw new Error('追加の質問が見つかりません')
+          }
+          const updated: PDFStudyMarkerRecord = nodeId && nodeId !== traceId
+            ? { ...trace, followUps: trace.followUps!.map(item => item.id === nodeId ? { ...item, grading } : item) }
+            : { ...trace, grading }
           await savePDFStudyMarker(updated)
           setStudyTraces(previous => previous.map(item => item.id === traceId ? updated : item))
         } catch (error) {
@@ -942,13 +1119,14 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
         modelName: response.modelName ?? null,
         responseTime: response.responseTime ?? clientResponseTimeSeconds,
         traceId,
+        nodeId,
       })
       addStatusMessage(traceSaved
-        ? `✅ 採点完了(${problems.length}問)`
-        : '❌ 採点は完了しましたが、PDFの印へ結果を保存できませんでした')
+        ? isFollowUpQuestion ? '✅ 質問への回答が届きました' : `✅ 採点完了(${problems.length}問)`
+        : isFollowUpQuestion ? '❌ 回答は届きましたが、質問履歴を保存できませんでした' : '❌ 採点は完了しましたが、PDFの印へ結果を保存できませんでした')
 
       // 採点履歴を保存
-      if (response.result.problems?.length) {
+      if (!isFollowUpQuestion && response.result.problems?.length) {
         const imageId = await saveGradingImage(croppedImageData)
         for (const problem of response.result.problems) {
           const historyRecord = {
@@ -984,7 +1162,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
     const sourcePanel = panelStack[activePanelIndex]
     if (sourcePanel?.type !== 'answer') return
     const answerState = answerPanelRef.current?.getAnswerState()
-    if (sourcePanel.traceId && answerState) saveStudyAnswer(sourcePanel.traceId, answerState)
+    if (sourcePanel.traceId && answerState) saveStudyAnswer(sourcePanel.traceId, sourcePanel.nodeId, answerState)
     const compositeImage = await answerPanelRef.current?.getCompositeImage()
     if (compositeImage) await confirmAndGrade(compositeImage, sourcePanel.sourcePageNumbers)
   }
@@ -1305,8 +1483,59 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
   const isOnAnswerPanel = activePanel?.type === 'answer'
   const isPenActive = isOnAnswerPanel ? !isEraserMode && !isTextMode : isDrawingMode
   const activeTraceId = activePanel?.type !== 'pdf' ? activePanel?.traceId : undefined
+  const activeGradingHasBranches = activePanel?.type === 'grading' &&
+    (studyTraces.find(item => item.id === activePanel.traceId)?.followUps ?? [])
+      .filter(item => item.parentId === (activePanel.nodeId ?? activePanel.traceId)).length > 1
+  const visibleBreadcrumbPanels = panelStack.slice(
+    0,
+    activePanel?.type === 'pdf' || activeGradingHasBranches ? activePanelIndex + 1 : undefined,
+  )
+
+  const renderGradingStudyMarkers = (panel: Extract<PanelData, { type: 'grading' }>) => {
+    if (!panel.traceId) return null
+    const trace = studyTraces.find(item => item.id === panel.traceId)
+    const followUps = trace?.followUps?.filter(item => item.parentId === (panel.nodeId ?? panel.traceId)) ?? []
+    if (followUps.length === 0) return null
+    return (
+      <div className="grading-study-markers">
+        {followUps.map(followUp => (
+          <div
+            key={followUp.id}
+            className={`grading-study-marker ${followUp.grading ? 'completed' : ''}`}
+            style={{
+              left: `${followUp.region.x * 100}%`,
+              top: `${followUp.region.y * 100}%`,
+              width: `${followUp.region.width * 100}%`,
+              height: `${followUp.region.height * 100}%`,
+            }}
+          >
+            <button
+              type="button"
+              data-study-followup-id={followUp.id}
+              aria-label="この範囲の質問を開く"
+              title="この範囲の質問を開く"
+              onClick={event => { event.stopPropagation(); void openStudyFollowUp(followUp.id) }}
+            >▶</button>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  const navigateToPanel = (index: number) => {
+    if (panelStack[index]?.type === 'pdf') {
+      setIsSelectionMode(true)
+      setIsDrawingMode(false)
+      setIsEraserMode(false)
+      setIsTextMode(false)
+      setSelectionRect(null)
+      setIsHoveringStudyTrace(false)
+      cancelGradingCapture()
+    }
+    setActivePanelIndex(index)
+  }
   const deleteActiveStudyTrace = async () => {
-    if (!activeTraceId || !confirm('この学習範囲の印を削除しますか？ 採点履歴一覧の記録は残ります。')) return
+    if (!activeTraceId || !confirm('PDF上の印と、そこから開く解答・採点履歴（追加の質問を含む）を削除しますか？ 採点履歴一覧の記録は残ります。')) return
     try {
       await pendingAnswerWritesRef.current.get(activeTraceId)?.catch(() => {})
       await deletePDFStudyMarker(activeTraceId)
@@ -1621,9 +1850,9 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       <div className="pdf-viewer">
         <StudyToolbar
           onBack={onBack}
-          breadcrumbs={panelStack.map((panel, i) => ({
+          breadcrumbs={visibleBreadcrumbPanels.map((panel, i) => ({
             label: getPanelLabel(panel),
-            onClick: () => setActivePanelIndex(i),
+            onClick: () => navigateToPanel(i),
             isCurrent: i === activePanelIndex
           }))}
           showPageViewControls={activePanel?.type === 'pdf'}
@@ -1661,6 +1890,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
           onClear={clearDrawing}
           onClearAll={clearAllDrawings}
           onGrade={isOnAnswerPanel ? handleGradeFromToolbar : undefined}
+          submissionKind={isOnAnswerPanel && activePanel.source === 'grading' ? 'ask' : 'grade'}
           canUndoAnswer={isOnAnswerPanel ? canUndoAnswer : undefined}
           onUndoAnswer={isOnAnswerPanel ? () => answerPanelRef.current?.undo() : undefined}
           onClearAnswer={isOnAnswerPanel ? () => answerPanelRef.current?.clear() : undefined}
@@ -1689,7 +1919,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
                   ref={i === activePanelIndex ? answerPanelRef : undefined}
                   questionImage={panel.questionImage}
                   initialAnswerState={panel.answerState}
-                  onAnswerStateChange={panel.traceId ? state => saveStudyAnswer(panel.traceId!, state) : undefined}
+                  onAnswerStateChange={panel.traceId ? state => saveStudyAnswer(panel.traceId!, panel.nodeId, state) : undefined}
                   paperOrientation={panel.paperOrientation}
                   penColor={penColor}
                   penSize={penSize}
@@ -1713,6 +1943,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
                     modelName={panel.modelName}
                     responseTime={panel.responseTime}
                     pdfId={pdfId}
+                    studyMarkers={renderGradingStudyMarkers(panel)}
                   />
                   {isGradingCaptureMode && i === activePanelIndex && (
                     <div
@@ -1721,12 +1952,19 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
                         position: 'absolute',
                         top: 0, left: 0, width: '100%', height: '100%',
                         zIndex: 9999,
-                        cursor: 'crosshair',
+                        cursor: isHoveringStudyTrace ? 'pointer' : 'crosshair',
                       }}
                       onMouseDown={handleGradingCaptureStart}
-                      onMouseMove={handleGradingCaptureMove}
+                      onMouseMove={event => {
+                        setIsHoveringStudyTrace(document.elementsFromPoint(event.clientX, event.clientY)
+                          .some(element => element.hasAttribute('data-study-followup-id')))
+                        handleGradingCaptureMove(event)
+                      }}
                       onMouseUp={handleGradingCaptureEnd}
-                      onMouseLeave={() => { if (isGradingCapturingRef.current) handleGradingCaptureEnd() }}
+                      onMouseLeave={() => {
+                        setIsHoveringStudyTrace(false)
+                        if (isGradingCapturingRef.current) handleGradingCaptureEnd()
+                      }}
                     >
                       {gradingCaptureRect && (
                         <div style={{
