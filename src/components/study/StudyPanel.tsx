@@ -359,10 +359,19 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       const trace = await getPDFStudyMarker(traceId)
       if (!trace || trace.pdfId !== pdfId) throw new Error('学習範囲が見つかりません')
       const paperOrientation = await getPDFPageOrientation(trace.sourcePageNumbers[0])
-      const panel: PanelData = trace.grading
-        ? { type: 'grading', ...trace.grading, sourcePageNumbers: trace.sourcePageNumbers, paperOrientation, traceId }
-        : { type: 'answer', questionImage: await recreateQuestionImage(trace.regions), sourcePageNumbers: trace.sourcePageNumbers, paperOrientation, answerState: trace.answer, traceId }
-      setPanelStack([{ type: 'pdf' }, panel])
+      const answerPanel: PanelData = {
+        type: 'answer',
+        questionImage: await recreateQuestionImage(trace.regions),
+        sourcePageNumbers: trace.sourcePageNumbers,
+        paperOrientation,
+        answerState: trace.answer,
+        traceId,
+      }
+      const panels: PanelData[] = [{ type: 'pdf' }, answerPanel]
+      if (trace.grading) {
+        panels.push({ type: 'grading', ...trace.grading, sourcePageNumbers: trace.sourcePageNumbers, paperOrientation, traceId })
+      }
+      setPanelStack(panels)
       setActivePanelIndex(1)
       setIsSelectionMode(false)
       setIsGradingCaptureMode(false)

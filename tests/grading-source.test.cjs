@@ -260,25 +260,31 @@ test('history and grading panels retain captured pages despite later PDF navigat
     assert.equal(traces[0].grading.result.problems[0].problemNumber, '1');
 });
 
-test('a PDF mark opens its stored grading result without saving another image', async () => {
+test('a graded PDF mark restores the answer sheet before its grading result', async () => {
     let panels, activeIndex;
+    const answer = { canvasWidth: 800, canvasHeight: 1200, strokes: [{ points: [[1, 2]] }], texts: [] };
     const run = handler('openStudyTrace', {
         pdfId: 'book',
         pendingAnswerWritesRef: { current: new Map() },
         getPDFPageOrientation: async () => 'landscape',
         getPDFStudyMarker: async () => ({
             id: 'trace', pdfId: 'book', sourcePageNumbers: [2],
+            regions: [{ pageNumber: 2 }], answer,
             grading: { result: { problems: [] }, modelName: null, responseTime: 1 },
         }),
+        recreateQuestionImage: async () => 'data:image/png;base64,recreated',
         setPanelStack: value => { panels = value; },
         setActivePanelIndex: value => { activeIndex = value; },
         setIsSelectionMode() {}, setIsGradingCaptureMode() {}, setSelectionRect() {},
         addStatusMessage() {}, console,
     });
     await run('trace');
-    assert.deepEqual(Array.from(panels, panel => panel.type), ['pdf', 'grading']);
+    assert.deepEqual(Array.from(panels, panel => panel.type), ['pdf', 'answer', 'grading']);
     assert.equal(panels[1].traceId, 'trace');
     assert.equal(panels[1].paperOrientation, 'landscape');
+    assert.equal(panels[1].questionImage, 'data:image/png;base64,recreated');
+    assert.equal(panels[1].answerState, answer);
+    assert.equal(panels[2].result.problems.length, 0);
     assert.equal(activeIndex, 1);
 });
 
