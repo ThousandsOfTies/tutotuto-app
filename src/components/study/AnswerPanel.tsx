@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect, forwardRef, useImperativeHandle } from 'react'
 import { ICON_SVG } from '../../constants/icons'
 import type { PDFStudyAnswerState } from '@home-teacher/common/utils/indexedDB'
+import { doPathsIntersect, isScratchPattern, type DrawingPath } from '@thousands-of-ties/drawing-common'
 import VoiceTextEditor from './VoiceTextEditor'
 import './AnswerPanel.css'
 
@@ -29,6 +30,30 @@ interface AnswerPanelProps {
 
 type AnswerText = PDFStudyAnswerState['texts'][number]
 type AnswerStroke = PDFStudyAnswerState['strokes'][number]
+
+const toDrawingPath = (stroke: AnswerStroke): DrawingPath => ({
+  points: stroke.points.map(([x, y]) => ({ x, y })),
+  color: stroke.color,
+  width: stroke.width,
+})
+
+const redrawAnswerStrokes = (canvas: HTMLCanvasElement, strokes: AnswerStroke[]) => {
+  const ctx = canvas.getContext('2d')!
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
+  for (const stroke of strokes) {
+    if (stroke.points.length < 2) continue
+    ctx.globalCompositeOperation = stroke.eraser ? 'destination-out' : 'source-over'
+    ctx.strokeStyle = stroke.color
+    ctx.lineWidth = stroke.width
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    ctx.beginPath()
+    ctx.moveTo(stroke.points[0][0], stroke.points[0][1])
+    for (const [x, y] of stroke.points.slice(1)) ctx.lineTo(x, y)
+    ctx.stroke()
+  }
+  ctx.globalCompositeOperation = 'source-over'
+}
 
 interface AnswerSnapshot {
   drawing: ImageData
@@ -432,7 +457,15 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
   const stopDraw = () => {
     const stroke = activeStrokeRef.current
     if (stroke && stroke.points.length > 1) {
-      strokesRef.current = [...strokesRef.current, stroke]
+      const path = toDrawingPath(stroke)
+      if (!stroke.eraser && isScratchPattern(path)) {
+        strokesRef.current = strokesRef.current.filter(existing =>
+          existing.eraser || !doPathsIntersect(path, toDrawingPath(existing))
+        )
+        if (drawCanvasRef.current) redrawAnswerStrokes(drawCanvasRef.current, strokesRef.current)
+      } else {
+        strokesRef.current = [...strokesRef.current, stroke]
+      }
       activeStrokeRef.current = null
       publishAnswerState()
     }

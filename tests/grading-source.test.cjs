@@ -11,6 +11,8 @@ const source = fs.readFileSync(filename, 'utf8');
 const ast = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const answerFilename = path.join(__dirname, '../src/components/study/AnswerPanel.tsx');
 const answerAst = ts.createSourceFile(answerFilename, fs.readFileSync(answerFilename, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+const drawingFilename = path.join(__dirname, '../../drawing-common/src/hooks/useDrawing.ts');
+const drawingAst = ts.createSourceFile(drawingFilename, fs.readFileSync(drawingFilename, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 function handler(name, adapters, componentAst = ast) {
     let initializer;
     function visit(node) {
@@ -24,6 +26,11 @@ function handler(name, adapters, componentAst = ast) {
     }).outputText;
     return vm.runInNewContext(code + '\nrun', adapters);
 }
+const toDrawingPath = handler('toDrawingPath', {}, answerAst);
+const redrawAnswerStrokes = handler('redrawAnswerStrokes', {}, answerAst);
+const doSegmentsIntersect = handler('doSegmentsIntersect', {}, drawingAst);
+const doPathsIntersect = handler('doPathsIntersect', { doSegmentsIntersect }, drawingAst);
+const isScratchPattern = handler('isScratchPattern', {}, drawingAst);
 
 function capture({ activeTab = 'A', isSplitView = false, pageA = 1, pageB = 5, pageAOrientation = 'landscape', pageBOrientation = 'portrait' } = {}) {
     const bounds = (left, right) => ({ left, right, top: 0, bottom: 100, width: right - left, height: 100 });
@@ -168,6 +175,7 @@ test('finishing a pen or eraser stroke publishes its coordinates', () => {
             saveSnapshot() {}, isDrawingRef, lastPosRef, activeStrokeRef, strokesRef,
             drawCanvasRef, getPos, isEraserMode, eraserSize: 20, penSize: 5,
             penColor: '#123456', publishAnswerState,
+            toDrawingPath, isScratchPattern, doPathsIntersect, redrawAnswerStrokes,
         };
         handler('startDraw', { ...adapters }, answerAst)(10, 20);
         handler('drawTo', { ...adapters }, answerAst)(30, 40);
@@ -177,6 +185,37 @@ test('finishing a pen or eraser stroke publishes its coordinates', () => {
     assert.deepEqual(Array.from(saved[0][0].points, point => Array.from(point)), [[10, 20], [30, 40]]);
     assert.equal(saved[1][1].eraser, true);
     assert.equal(saved[1][1].width, 20);
+});
+
+test('pen scratch removes crossed answer strokes and persists the remaining drawing', () => {
+    const touched = { points: [[5, 0], [5, 30]], width: 5, color: '#123456', eraser: false };
+    const untouched = { points: [[100, 0], [100, 30]], width: 5, color: '#123456', eraser: false };
+    const scratch = {
+        points: Array.from({ length: 6 }, (_, row) =>
+            (row % 2 ? [10, 8, 6, 4, 2, 0] : [0, 2, 4, 6, 8, 10])
+                .map(x => [x, 10 + row])).flat(),
+        width: 5, color: '#123456', eraser: false,
+    };
+    assert.equal(isScratchPattern(toDrawingPath(scratch)), true);
+    let clears = 0, painted = 0;
+    const context = {
+        clearRect() { clears++; }, beginPath() {}, moveTo() {}, lineTo() {},
+        stroke() { painted++; },
+    };
+    const drawCanvasRef = { current: { width: 200, height: 100, getContext: () => context } };
+    const strokesRef = { current: [touched, untouched] };
+    const activeStrokeRef = { current: scratch };
+    let saved;
+    handler('stopDraw', {
+        activeStrokeRef, strokesRef, drawCanvasRef,
+        isDrawingRef: { current: true }, lastPosRef: { current: { x: 0, y: 0 } },
+        toDrawingPath, isScratchPattern, doPathsIntersect, redrawAnswerStrokes,
+        publishAnswerState: () => { saved = strokesRef.current; },
+    }, answerAst)();
+    assert.equal(clears, 1);
+    assert.equal(painted, 1);
+    assert.deepEqual(Array.from(saved), [untouched]);
+    assert.equal(activeStrokeRef.current, null);
 });
 
 test('saves the latest answer for a PDF range without a second image', async () => {
