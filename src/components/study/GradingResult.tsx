@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next'
-import { lazy, Suspense, type ReactNode } from 'react'
+import { lazy, Suspense, useRef, type ReactNode, type RefObject } from 'react'
 import { GradingResponseResult } from '@home-teacher/common/services/api'
 import { SNSLinkRecord } from '@home-teacher/common/utils/indexedDB'
 // import { getSNSIcon } from '@home-teacher/common/constants/sns'
@@ -14,10 +14,11 @@ interface GradingResultProps {
   modelName?: string | null
   responseTime?: number | null
   pdfId?: string
-  studyMarkers?: ReactNode
+  studyMarkers?: ReactNode | ((viewportRef: RefObject<HTMLDivElement>) => ReactNode)
 }
 
 const GradingResult = ({ result, snsLinks = [], timeLimitMinutes = 30, modelName, responseTime, pdfId, studyMarkers }: GradingResultProps) => {
+  const viewportRef = useRef<HTMLDivElement>(null)
   const { t } = useTranslation()
 
   const validProblems = result?.problems?.filter(problem =>
@@ -32,7 +33,7 @@ const GradingResult = ({ result, snsLinks = [], timeLimitMinutes = 30, modelName
   }
 
   return (
-    <div className="grading-result-content">
+    <div className="grading-result-content" ref={viewportRef}>
       <div className="result-content">
         <div className="result-inner">
           {isQuestionResponse ? (
@@ -132,7 +133,7 @@ const GradingResult = ({ result, snsLinks = [], timeLimitMinutes = 30, modelName
               </button>
             </div>
           )}
-          {studyMarkers}
+          {typeof studyMarkers === 'function' ? studyMarkers(viewportRef) : studyMarkers}
         </div>
       </div>
 

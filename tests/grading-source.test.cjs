@@ -24,7 +24,10 @@ function handler(name, adapters, componentAst = ast) {
     const code = ts.transpileModule('const run = ' + initializer.getText(componentAst), {
         compilerOptions: { target: ts.ScriptTarget.ES2022 }
     }).outputText;
-    return vm.runInNewContext(code + '\nrun', adapters);
+    return vm.runInNewContext(code + '\nrun', {
+        traceUndo: { busy: false }, deletedStudyNodeIdsRef: { current: new Set() }, handledTracePointerRef: { current: false },
+        ...adapters,
+    });
 }
 const toDrawingPath = handler('toDrawingPath', {}, answerAst);
 const redrawAnswerStrokes = handler('redrawAnswerStrokes', {}, answerAst);
@@ -38,6 +41,72 @@ vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname,
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText, { exports: panelWheelExports });
 const { getPanelWheelDestination } = panelWheelExports;
+
+test('deleting an active answer flushes the latest strokes before cutting its route and keeps another PDF mark', async () => {
+    const answer = { strokes: [{ points: [[10, 20], [30, 40]] }], texts: [{ text: '最後の解答' }] };
+    let traces = [{ id: 'root' }, { id: 'other' }];
+    let panels = [{ type: 'pdf' }, { type: 'answer', traceId: 'root' }, { type: 'grading', traceId: 'root' }];
+    const writes = new Map(), deleted = new Set(), actions = [];
+    await handler('deleteStudyTrace', {
+        isGrading: false, activePanel: panels[1], activePanelIndex: 1, panelStack: panels,
+        answerPanelRef: { current: { getAnswerState: () => answer } }, pendingAnswerWritesRef: { current: writes },
+        deletedStudyNodeIdsRef: { current: deleted },
+        saveStudyAnswer: (id, _nodeId, value) => {
+            assert.equal(value, answer);
+            writes.set(id, Promise.resolve().then(() => actions.push('saved')));
+        },
+        traceUndo: { busy: false, deleteTrace: async (target, beforeDelete) => {
+            assert.equal(target.traceId, 'root');
+            await beforeDelete();
+            assert.deepEqual(actions, ['saved']);
+            actions.push('deleted');
+            return { marker: { id: 'root' }, removedNodeIds: ['root', 'child'] };
+        } },
+        setStudyTraces: update => { traces = update(traces); }, setPanelStack: update => { panels = update(panels); },
+        navigateToPanel: index => { assert.equal(index, 0); actions.push('PDF'); }, addStatusMessage() {}, console,
+    })('root');
+    assert.deepEqual(traces, [{ id: 'other' }]);
+    assert.equal(panels.length, 1);
+    assert.deepEqual(actions, ['saved', 'deleted', 'PDF']);
+    assert.equal(deleted.has('child'), true);
+});
+
+test('deleting a follow-up cuts only that branch from the breadcrumbs and undo restores the current stored marker', async () => {
+    const marker = { id: 'root', followUps: [{ id: 'first' }, { id: 'next' }, { id: 'second' }] };
+    let traces = [marker], panels = [
+        { type: 'pdf' }, { type: 'answer', traceId: 'root' }, { type: 'grading', traceId: 'root' },
+        { type: 'answer', traceId: 'root', nodeId: 'first' }, { type: 'grading', traceId: 'root', nodeId: 'first' },
+    ];
+    const snapshot = { marker, nodeId: 'first', removedNodeIds: ['first', 'next'] }, deleted = new Set();
+    const common = {
+        deletedStudyNodeIdsRef: { current: deleted },
+        setStudyTraces: update => { traces = update(traces); }, addStatusMessage() {}, console,
+    };
+    await handler('deleteStudyTrace', { ...common,
+        isGrading: false, activePanel: panels[2], activePanelIndex: 2, panelStack: panels,
+        pendingAnswerWritesRef: { current: new Map() },
+        traceUndo: { busy: false, deleteTrace: async (target, flush) => { assert.equal(target.nodeId, 'first'); await flush(); return snapshot; } },
+        setPanelStack: update => { panels = update(panels); }, navigateToPanel() { assert.fail('parent must remain active'); },
+    })('root', 'first');
+    assert.equal(panels.length, 3);
+    assert.deepEqual(traces[0].followUps.map(node => node.id), ['second']);
+    assert.equal(deleted.has('root'), false);
+    const latest = { ...marker, grading: { result: { overallComment: '保存済みの採点結果' } } };
+    await handler('undoStudyTraceDeletion', { ...common,
+        traceUndo: { undoDelete: async () => snapshot }, getPDFStudyMarker: async () => latest,
+    })();
+    assert.equal(traces[0], latest);
+    assert.equal(deleted.size, 0);
+});
+
+test('a late answer callback cannot recreate a deleted root or follow-up', () => {
+    for (const id of ['root', 'child']) {
+        handler('saveStudyAnswer', {
+            deletedStudyNodeIdsRef: { current: new Set([id]) },
+            pendingAnswerWritesRef: { get current() { assert.fail('deleted answers must not queue a write'); } },
+        })('root', 'child', { strokes: [], texts: [] });
+    }
+});
 
 test('grading question markers stay anchored to scrolled result content', () => {
     const panel = { left: 10, top: 20 };
