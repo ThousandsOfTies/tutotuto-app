@@ -32,6 +32,12 @@ const doSegmentsIntersect = handler('doSegmentsIntersect', {}, drawingAst);
 const doPathsIntersect = handler('doPathsIntersect', { doSegmentsIntersect }, drawingAst);
 const isScratchPattern = handler('isScratchPattern', {}, drawingAst);
 const getGradingCaptureGeometry = handler('getGradingCaptureGeometry', {});
+const panelWheelExports = {};
+vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname,
+    '../../home-teacher-common/src/utils/panelWheelNavigation.ts'), 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText, { exports: panelWheelExports });
+const { getPanelWheelDestination } = panelWheelExports;
 
 test('grading question markers stay anchored to scrolled result content', () => {
     const panel = { left: 10, top: 20 };
@@ -609,13 +615,81 @@ test('returning to PDF activates range selection instead of leaving no tool acti
         setActivePanelIndex: value => modeChanges.push(['panel', value]),
     });
     run(0);
-    assert.deepEqual(modeChanges, [
-        ['selection', true], ['pen', false], ['eraser', false], ['text', false],
-        ['rect', null], ['hover', false], ['grading', false], ['panel', 0],
-    ]);
+    assert.deepEqual(Object.fromEntries(modeChanges), {
+        selection: true, pen: false, eraser: false, text: false,
+        rect: null, hover: false, grading: false, panel: 0,
+    });
     modeChanges.length = 0;
     run(1);
-    assert.deepEqual(modeChanges, [['panel', 1]]);
+    assert.deepEqual(Object.fromEntries(modeChanges), {
+        selection: false, pen: false, eraser: false, text: false,
+        hover: false, grading: false, panel: 1,
+    });
+});
+
+test('PDF horizontal navigation uses visible-page marks and never chooses between multiple ranges', () => {
+    const root = { id: 'root', regions: [{ pageNumber: 1 }] };
+    const other = { id: 'other', regions: [{ pageNumber: 2 }] };
+    const panelStack = [{ type: 'pdf' }, { type: 'answer', traceId: 'root', nodeId: 'root' }];
+    const base = { activePanel: panelStack[0], panelStack, activePanelIndex: 0,
+        studyTraces: [root, other], pageA: 1, pageB: 2, isSplitView: false, activeTab: 'A', getPanelWheelDestination };
+    const read = overrides => handler('getWheelDestination', { ...base, ...overrides })(1);
+    assert.deepEqual(JSON.parse(JSON.stringify(read())), { type: 'panel', index: 1 });
+    assert.equal(read({ studyTraces: [root, { id: 'second', regions: [{ pageNumber: 1 }] }] }), null);
+    assert.equal(read({ isSplitView: true }), null);
+    assert.deepEqual(JSON.parse(JSON.stringify(read({ activeTab: 'B' }))), { type: 'marker', id: 'other' });
+    assert.equal(read({ pageA: 3 }), null);
+});
+
+test('grading forks block right even with a retained child panel and always allow going left', () => {
+    const activePanel = { type: 'grading', traceId: 'root', nodeId: 'root' };
+    const panelStack = [{ type: 'pdf' }, { type: 'answer' }, activePanel, { type: 'answer', nodeId: 'a' }];
+    const root = { id: 'root', followUps: [
+        { id: 'a', parentId: 'root' }, { id: 'b', parentId: 'root' }, { id: 'later', parentId: 'a' },
+    ] };
+    const base = { activePanel, panelStack, activePanelIndex: 2, studyTraces: [root], getPanelWheelDestination };
+    const read = handler('getWheelDestination', base);
+    assert.equal(read(1), null);
+    assert.deepEqual(JSON.parse(JSON.stringify(read(-1))), { type: 'panel', index: 1 });
+    const single = handler('getWheelDestination', { ...base, studyTraces: [{ ...root, followUps: root.followUps.slice(0, 1) }] });
+    assert.deepEqual(JSON.parse(JSON.stringify(single(1))), { type: 'panel', index: 3 });
+});
+
+test('horizontal movement opens only its chosen adjacent question and does nothing without a destination', async () => {
+    const calls = [];
+    let destination = null;
+    const adapters = {
+        getWheelDestination: () => destination, activePanel: { type: 'grading' },
+        navigateToPanel: index => calls.push(['panel', index]),
+        openStudyTrace: async id => calls.push(['pdf-mark', id]),
+        openStudyFollowUp: async (...args) => calls.push(['question-mark', ...args]),
+    };
+    const run = handler('navigateWithWheel', adapters);
+    await run(1); assert.deepEqual(calls, []);
+    destination = { type: 'panel', index: 1 }; await run(-1);
+    destination = { type: 'marker', id: 'child' }; await run(1);
+    await handler('navigateWithWheel', { ...adapters, activePanel: { type: 'pdf' } })(1);
+    assert.deepEqual(calls, [['panel', 1], ['question-mark', 'child', true], ['pdf-mark', 'child']]);
+});
+
+test('a sole follow-up opened by wheel restores its route but shows the first new question', async () => {
+    const grading = { result: { problems: [] }, modelName: null, responseTime: 1 };
+    const trace = { id: 'root', pdfId: 'book', sourcePageNumbers: [1], followUps: [
+        { id: 'first', parentId: 'root', grading }, { id: 'last', parentId: 'first', grading },
+    ] };
+    const panelStack = [{ type: 'pdf' }, { type: 'answer' }, { type: 'grading', traceId: 'root', nodeId: 'root' }];
+    let panels, activeIndex;
+    const run = handler('openStudyFollowUp', {
+        pdfId: 'book', panelStack, activePanelIndex: 2, pendingAnswerWritesRef: { current: new Map() },
+        getPDFStudyMarker: async () => trace, setStudyTraces() {},
+        appendFollowUpPath: handler('appendFollowUpPath', { loadFollowUpQuestionImage: async (_, id) => id }),
+        setPanelStack: value => { panels = value; }, setActivePanelIndex: value => { activeIndex = value; },
+        cancelGradingCapture() {}, setIsHoveringStudyTrace() {}, addStatusMessage: message => assert.fail(message), console,
+    });
+    await run('first', true);
+    assert.equal(activeIndex, 3);
+    assert.equal(panels[activeIndex].questionImage, 'first');
+    assert.equal(panels.at(-1).nodeId, 'last');
 });
 
 test('answer export preserves the selected answer source across async panel navigation', async () => {

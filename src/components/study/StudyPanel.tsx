@@ -12,6 +12,8 @@ import { DrawingPath } from '@thousands-of-ties/drawing-common'
 import { PDFPane, PDFPaneHandle } from '@home-teacher/common/components/study/PDFPane'
 import { StudyToolbar, BreadcrumbItem } from './StudyToolbar'
 import { usePDFRenderer } from '@home-teacher/common/hooks/pdf/usePDFRenderer'
+import { useWheelPanelNavigation } from '@home-teacher/common/hooks/useWheelPanelNavigation'
+import { getPanelWheelDestination } from '@home-teacher/common/utils/panelWheelNavigation'
 import './StudyPanel.css'
 import { compressImageDataUrl } from '@home-teacher/common/utils/image'
 import { useAuth } from '@home-teacher/common/contexts/AuthContext'
@@ -71,6 +73,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
   // Refs
   const paneARef = useRef<PDFPaneHandle>(null)
   const paneBRef = useRef<PDFPaneHandle>(null)
+  const panelNavigationRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const answerPanelRef = useRef<AnswerPanelHandle>(null)
   const gradingPanelRef = useRef<HTMLDivElement>(null)
@@ -486,7 +489,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
     }
   }
 
-  const openStudyFollowUp = async (nodeId: string) => {
+  const openStudyFollowUp = async (nodeId: string, openQuestion = false) => {
     const sourcePanel = panelStack[activePanelIndex]
     if (sourcePanel?.type !== 'grading' || !sourcePanel.traceId) return
     try {
@@ -495,9 +498,10 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       if (!trace || trace.pdfId !== pdfId) throw new Error('学習範囲が見つかりません')
       setStudyTraces(previous => previous.map(item => item.id === trace.id ? trace : item))
       const panels = panelStack.slice(0, activePanelIndex + 1)
+      const questionPanelIndex = panels.length
       await appendFollowUpPath(trace, panels, sourcePanel.paperOrientation, nodeId)
       setPanelStack(panels)
-      setActivePanelIndex(panels.length - 1)
+      setActivePanelIndex(openQuestion ? questionPanelIndex : panels.length - 1)
       cancelGradingCapture()
       setIsHoveringStudyTrace(false)
     } catch (error) {
@@ -1526,15 +1530,51 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
   const navigateToPanel = (index: number) => {
     if (panelStack[index]?.type === 'pdf') {
       setIsSelectionMode(true)
-      setIsDrawingMode(false)
-      setIsEraserMode(false)
-      setIsTextMode(false)
       setSelectionRect(null)
-      setIsHoveringStudyTrace(false)
-      cancelGradingCapture()
+    } else {
+      setIsSelectionMode(false)
     }
+    setIsDrawingMode(false)
+    setIsEraserMode(false)
+    setIsTextMode(false)
+    setIsHoveringStudyTrace(false)
+    cancelGradingCapture()
     setActivePanelIndex(index)
   }
+
+  const getWheelDestination = (direction: -1 | 1) => {
+    let outgoingIds: string[] | undefined
+    if (activePanel?.type === 'pdf') {
+      const visiblePages = isSplitView ? [pageA, pageB] : [activeTab === 'A' ? pageA : pageB]
+      outgoingIds = studyTraces.filter(trace => trace.regions.some(region => visiblePages.includes(region.pageNumber)))
+        .map(trace => trace.id)
+    } else if (activePanel?.type === 'grading') {
+      const children = (studyTraces.find(trace => trace.id === activePanel.traceId)?.followUps ?? [])
+        .filter(child => child.parentId === (activePanel.nodeId ?? activePanel.traceId))
+      if (children.length) outgoingIds = children.map(child => child.id)
+    }
+    const next = panelStack[activePanelIndex + 1]
+    return getPanelWheelDestination({
+      direction, currentIndex: activePanelIndex, panelCount: panelStack.length, outgoingIds,
+      nextPanelId: next?.type !== 'pdf' ? next?.nodeId ?? next?.traceId : undefined,
+    })
+  }
+
+  const navigateWithWheel = async (direction: -1 | 1) => {
+    const destination = getWheelDestination(direction)
+    if (!destination) return
+    if (destination.type === 'panel') navigateToPanel(destination.index)
+    else if (activePanel?.type === 'pdf') await openStudyTrace(destination.id)
+    else if (activePanel?.type === 'grading') await openStudyFollowUp(destination.id, true)
+  }
+
+  useWheelPanelNavigation({
+    enabled: true, containerRef: panelNavigationRef, navigationKey: activePanel,
+    canGoBack: getWheelDestination(-1) !== null, canGoForward: getWheelDestination(1) !== null,
+    busy: isGrading || !!editingText || isSelectingRef.current || isGradingCapturingRef.current,
+    onNavigate: navigateWithWheel,
+  })
+
   const deleteActiveStudyTrace = async () => {
     if (!activeTraceId || !confirm('PDF上の印と、そこから開く解答・採点履歴（追加の質問を含む）を削除しますか？ 採点履歴一覧の記録は残ります。')) return
     try {
@@ -1906,7 +1946,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
           defaultModelName={defaultModelName}
         />
 
-        <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
+        <div ref={panelNavigationRef} style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
           {panelStack.map((panel, i) => (
             <div
               key={i}
