@@ -99,7 +99,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
 
   // Layout State
   const [isSplitView, setIsSplitView] = useState(false)
-  const [activeTab, setActiveTab] = useState<'A' | 'B'>('A')
+  const [activeTab, setActiveTab] = useState<'A' | 'B'>('B')
 
   // Split Ratio
   const [splitRatio, setSplitRatio] = useState(() => {
@@ -1217,12 +1217,13 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
 
   // クリア機能（現在のページのみ）
   const clearDrawing = () => {
+    const currentPage = activeTab === 'A' ? pageA : pageB
     setDrawingPaths(prev => {
       const newMap = new Map(prev)
-      newMap.delete(pageA)
+      newMap.delete(currentPage)
       return newMap
     })
-    pendingDrawingWritesRef.current.set(pageA, JSON.stringify([]))
+    pendingDrawingWritesRef.current.set(currentPage, JSON.stringify([]))
     addStatusMessage('描画をクリアしました')
   }
 
@@ -1389,6 +1390,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       setPageB(tempA)
     } else {
       // スプリット表示をオンにする
+      setActiveTab('B')
       setIsSplitView(true)
     }
   }
@@ -1927,6 +1929,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
           activeTab={activeTab}
           toggleActiveTab={() => {
             if (isSplitView) {
+              setActiveTab('B')
               setIsSplitView(false)
             } else {
               setActiveTab(prev => prev === 'A' ? 'B' : 'A')
