@@ -505,7 +505,7 @@ test('a follow-up asks the tutor without grading or adding grading history', asy
     assert.equal(panels[0].nodeId, 'child');
 });
 
-test('a graded PDF mark restores the answer sheet before its grading result', async () => {
+test('a graded PDF mark opens the saved answer sheet with its grading result in breadcrumbs', async () => {
     let panels, activeIndex;
     const answer = { canvasWidth: 800, canvasHeight: 1200, strokes: [{ points: [[1, 2]] }], texts: [] };
     const run = handler('openStudyTrace', {
@@ -532,7 +532,47 @@ test('a graded PDF mark restores the answer sheet before its grading result', as
     assert.equal(panels[1].questionImage, 'data:image/png;base64,recreated');
     assert.equal(panels[1].answerState, answer);
     assert.equal(panels[2].result.problems.length, 0);
-    assert.equal(activeIndex, 2);
+    assert.equal(activeIndex, 1);
+});
+
+test('a PDF mark restores its route up to a fork while displaying the first answer sheet', async () => {
+    const grading = { result: { problems: [] }, modelName: null, responseTime: 1 };
+    for (const branches of [false, true]) {
+        const trace = {
+            id: 'root', pdfId: 'book', sourcePageNumbers: [2], regions: [{ pageNumber: 2 }], grading,
+            followUps: [
+                { id: 'first', parentId: 'root', grading },
+                { id: 'second', parentId: 'first', grading },
+                ...(branches ? [
+                    { id: 'branch-a', parentId: 'second' },
+                    { id: 'branch-b', parentId: 'second' },
+                ] : [{ id: 'last-question', parentId: 'second' }]),
+            ],
+        };
+        let panels, activeIndex;
+        const loaded = [];
+        const run = handler('openStudyTrace', {
+            pdfId: 'book', pendingAnswerWritesRef: { current: new Map() },
+            getPDFStudyMarker: async () => trace,
+            getPDFPageOrientation: async () => 'landscape',
+            recreateQuestionImage: async () => 'root-image',
+            appendFollowUpPath: handler('appendFollowUpPath', {
+                loadFollowUpQuestionImage: async (_, id) => { loaded.push(id); return `image:${id}`; },
+            }),
+            setStudyTraces() {}, setPanelStack: value => { panels = value; },
+            setActivePanelIndex: value => { activeIndex = value; },
+            setIsSelectionMode() {}, setIsGradingCaptureMode() {}, setSelectionRect() {},
+            addStatusMessage: message => assert.fail(message), console,
+        });
+        await run('root');
+        assert.equal(activeIndex, 1);
+        assert.equal(panels[activeIndex].questionImage, 'root-image');
+        assert.deepEqual(Array.from(panels, panel => panel.nodeId), [
+            undefined, 'root', 'root', 'first', 'first', 'second', 'second',
+            ...(branches ? [] : ['last-question']),
+        ]);
+        assert.deepEqual(loaded, branches ? ['first', 'second'] : ['first', 'second', 'last-question']);
+    }
 });
 
 test('an ungraded PDF mark opens its saved answer', async () => {

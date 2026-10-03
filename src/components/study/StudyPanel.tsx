@@ -475,7 +475,8 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
         }
       }
       setPanelStack(panels)
-      setActivePanelIndex(panels.length - 1)
+      // Restore breadcrumbs up to the first branch, then show the answer sheet after the PDF.
+      setActivePanelIndex(1)
       setIsSelectionMode(false)
       setIsGradingCaptureMode(false)
       setSelectionRect(null)
