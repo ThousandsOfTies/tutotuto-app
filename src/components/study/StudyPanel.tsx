@@ -6,11 +6,10 @@ import { GradingResponseResult, getAvailableModels, gradeWork, askQuestion, Mode
 import GradingResult from './GradingResult'
 import AnswerPanel, { AnswerPanelHandle } from './AnswerPanel'
 import VoiceTextEditor from './VoiceTextEditor'
-import { deleteAllDrawings, flushDrawingSaves, getAllDrawings, getPDFRecord, updatePDFRecord, getAllSNSLinks, SNSLinkRecord, PDFFileRecord, saveGradingHistory, generateGradingHistoryId, saveGradingImage, scheduleDrawingSave, saveTextAnnotation, PDFStudyAnswerState, PDFStudyRegion, PDFStudyMarkerRecord, PDFStudyFollowUp, savePDFStudyMarker, getPDFStudyMarker, getPDFStudyMarkersByPdfId, appendPDFStudyFollowUp, getPDFStudyAsset } from '@home-teacher/common/utils/indexedDB'
-import { ICON_SVG } from '../../constants/icons'
+import { flushDrawingSaves, getAllDrawings, getPDFRecord, updatePDFRecord, getAllSNSLinks, SNSLinkRecord, PDFFileRecord, saveGradingHistory, generateGradingHistoryId, saveGradingImage, scheduleDrawingSave, saveTextAnnotation, PDFStudyAnswerState, PDFStudyRegion, PDFStudyMarkerRecord, PDFStudyFollowUp, savePDFStudyMarker, getPDFStudyMarker, getPDFStudyMarkersByPdfId, appendPDFStudyFollowUp, getPDFStudyAsset } from '@home-teacher/common/utils/indexedDB'
 import { DrawingPath } from '@thousands-of-ties/drawing-common'
 import { PDFPane, PDFPaneHandle } from '@home-teacher/common/components/study/PDFPane'
-import { StudyToolbar, BreadcrumbItem } from './StudyToolbar'
+import { StudyToolbar } from './StudyToolbar'
 import { usePDFRenderer } from '@home-teacher/common/hooks/pdf/usePDFRenderer'
 import { useWheelPanelNavigation } from '@home-teacher/common/hooks/useWheelPanelNavigation'
 import { PanelForwardButton } from '@home-teacher/common/components/study/PanelForwardButton'
@@ -93,19 +92,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
   const [gradingCaptureRect, setGradingCaptureRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
   const [isGradingCaptureMode, setIsGradingCaptureMode] = useState(false)
 
-  // --- Consolidated State & Logic ---
-
-  // Status Handling
-  const [statusMessage, setStatusMessage] = useState('')
-
-  // Helper Methods (Hoisted)
-  const addStatusMessage = (message: string) => {
-    const timestamp = new Date().toLocaleTimeString('ja-JP')
-    const fullMessage = `[${timestamp}] ${message}`
-    // console.log(fullMessage)
-    setStatusMessage(message)
-  }
-
   // Layout State
   const [isSplitView, setIsSplitView] = useState(false)
   const [activeTab, setActiveTab] = useState<'A' | 'B'>('B')
@@ -183,14 +169,10 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
   const [penColor, setPenColor] = useState('#FF0000') // Updated to match bottom block default
   const [penSize, setPenSize] = useState(3)
   const [eraserSize, setEraserSize] = useState(50)
-  // Popups
-  const [showPenPopup, setShowPenPopup] = useState(false)
-  const [showEraserPopup, setShowEraserPopup] = useState(false)
 
   // Text State
   const [textFontSize, setTextFontSize] = useState(16)
   const [textDirection, setTextDirection] = useState<TextDirection>('horizontal')
-  const [showTextPopup, setShowTextPopup] = useState(false)
   const [editingText, setEditingText] = useState<{
     pageNum: number
     x: number
@@ -242,7 +224,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
   }, [pdfId])
   const EMPTY_PATHS: DrawingPath[] = useMemo(() => [], [])
   const drawingPathsA = useMemo(() => drawingPaths.get(pageA) ?? EMPTY_PATHS, [drawingPaths, pageA, EMPTY_PATHS])
-  const drawingPathsB = useMemo(() => drawingPaths.get(pageB) ?? EMPTY_PATHS, [drawingPaths, pageB, EMPTY_PATHS])
 
   // Load Drawings Effect
   useEffect(() => {
@@ -307,9 +288,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
     return () => { active = false }
   }, [pdfId])
 
-  // canUndo state for answer panel (managed reactively via callback)
-  const [canUndoAnswer, setCanUndoAnswer] = useState(false)
-
   const getPanelLabel = (panel: PanelData): string => {
     switch (panel.type) {
       case 'pdf': return 'PDF'
@@ -343,7 +321,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
     pendingAnswerWritesRef.current.set(traceId, next)
     void next.catch(error => {
       console.error('解答の保存に失敗しました:', error)
-      addStatusMessage('❌ 解答を保存できませんでした')
     }).finally(() => {
       if (pendingAnswerWritesRef.current.get(traceId) === next) pendingAnswerWritesRef.current.delete(traceId)
     })
@@ -487,7 +464,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
           await appendFollowUpPath(trace, panels, paperOrientation)
         } catch (error) {
           console.error('追加の質問を復元できませんでした:', error)
-          addStatusMessage('⚠️ 追加の質問の一部を復元できませんでした')
         }
       }
       setPanelStack(panels)
@@ -498,7 +474,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       setSelectionRect(null)
     } catch (error) {
       console.error('学習範囲を開けませんでした:', error)
-      addStatusMessage('❌ 学習範囲を開けませんでした')
     }
   }
 
@@ -520,7 +495,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       setIsHoveringStudyTrace(false)
     } catch (error) {
       console.error('追加の質問を開けませんでした:', error)
-      addStatusMessage('❌ 追加の質問を開けませんでした')
     }
   }
 
@@ -794,12 +768,10 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
         setIsSelectionMode(false)
         setSelectionRect(null)
       } else {
-        addStatusMessage("❌ 画像のキャプチャに失敗しました")
         setSelectionRect(null)
       }
     } catch (error) {
       console.error("Capture error:", error)
-      addStatusMessage('❌ 学習範囲を保存できませんでした')
       setSelectionRect(null)
     }
   }
@@ -921,7 +893,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       setGradingCaptureRect(null)
     } catch (error) {
       console.error('Grading capture error:', error)
-      addStatusMessage('❌ 追加の質問を作成・保存できませんでした')
       gradingCaptureRectRef.current = null
       setGradingCaptureRect(null)
     }
@@ -1111,7 +1082,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       if (isFollowUpQuestion && parentPanel?.type !== 'grading') {
         throw new Error('質問元の採点結果が見つかりません')
       }
-      addStatusMessage(isFollowUpQuestion ? '💬 AIが質問に回答中...' : '🎯 AI採点中...')
       const startTime = Date.now()
       const model = selectedModel !== 'default' ? selectedModel : undefined
       const response = isFollowUpQuestion && parentPanel.type === 'grading'
@@ -1136,7 +1106,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       }
 
       const gradingResult = { ...response.result, problems }
-      let traceSaved = true
       if (traceId) {
         try {
           await pendingAnswerWritesRef.current.get(traceId)
@@ -1157,7 +1126,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
           setStudyTraces(previous => previous.map(item => item.id === traceId ? updated : item))
         } catch (error) {
           console.error('学習範囲への採点結果の保存に失敗しました:', error)
-          traceSaved = false
         }
       }
       pushPanel({
@@ -1170,9 +1138,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
         traceId,
         nodeId,
       })
-      addStatusMessage(traceSaved
-        ? isFollowUpQuestion ? '✅ 質問への回答が届きました' : `✅ 採点完了(${problems.length}問)`
-        : isFollowUpQuestion ? '❌ 回答は届きましたが、質問履歴を保存できませんでした' : '❌ 採点は完了しましたが、PDFの印へ結果を保存できませんでした')
 
       // 採点履歴を保存
       if (!isFollowUpQuestion && response.result.problems?.length) {
@@ -1216,10 +1181,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
     if (compositeImage) await confirmAndGrade(compositeImage, sourcePanel.sourcePageNumbers)
   }
 
-  // プレビューのキャンセル
-  const cancelPreview = () => {
-  }
-
   // 描画モードの切り替え
   const toggleDrawingMode = () => {
     if (!isDrawingMode) {
@@ -1229,7 +1190,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       setIsTextMode(false)
       setIsSelectionMode(false)
       setSelectionRect(null)
-      addStatusMessage('✏️ ペンモード')
     }
   }
 
@@ -1242,37 +1202,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       setIsTextMode(false)
       setIsSelectionMode(false)
       setSelectionRect(null)
-      addStatusMessage('🧹 消しゴムモード')
-    }
-  }
-
-  // クリア機能（現在のページのみ）
-  const clearDrawing = () => {
-    const currentPage = activeTab === 'A' ? pageA : pageB
-    setDrawingPaths(prev => {
-      const newMap = new Map(prev)
-      newMap.delete(currentPage)
-      return newMap
-    })
-    pendingDrawingWritesRef.current.set(currentPage, JSON.stringify([]))
-    addStatusMessage('描画をクリアしました')
-  }
-
-  // すべてのページの描画をクリア
-  const clearAllDrawings = async () => {
-    if (!confirm('すべてのページのペン跡を削除しますか？この操作は取り消せません。')) {
-      return
-    }
-
-    setDrawingPaths(new Map())
-    pendingDrawingWritesRef.current.clear()
-    // IndexedDBのページ別筆跡ストアからも削除
-    try {
-      await deleteAllDrawings(pdfId)
-      addStatusMessage('🗑️ すべてのペン跡を削除しました')
-    } catch (error) {
-      console.error('ペン跡の削除に失敗:', error)
-      addStatusMessage('❌ ペン跡の削除に失敗しました')
     }
   }
 
@@ -1282,7 +1211,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
     if (currentPanel?.type === 'grading') {
       // 採点結果パネル上での範囲選択（html2canvasでキャプチャ）
       activateGradingCapture()
-      addStatusMessage('📐 キャプチャする範囲を選択してください')
       return
     }
     // PDFパネルが表示されていない場合は先にPDFパネルへ移動
@@ -1295,7 +1223,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
     setIsEraserMode(false)
     setIsTextMode(false)
     setSelectionRect(null)
-    addStatusMessage('📐 採点範囲を選択してください')
   }
 
   // テキストモードのトグル
@@ -1352,7 +1279,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
 
         return newMap
       })
-      addStatusMessage('📝 テキストを更新しました')
       finish()
       return
     }
@@ -1385,7 +1311,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
 
       return newMap
     })
-    addStatusMessage('📝 テキストを追加しました')
     finish()
   }
 
@@ -1406,7 +1331,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
 
       return newMap
     })
-    addStatusMessage('🗑️ テキストを削除しました')
   }
 
   // ステータスメッセージ
@@ -1461,7 +1385,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
   // 矩形選択モードをキャンセル
   const handleCancelSelection = () => {
     setSelectionRect(null)
-    addStatusMessage('選択をクリアしました。再度範囲を選択してください')
   }
 
   // リサイズハンドラ
@@ -1657,10 +1580,8 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
         setPanelStack(previous => previous.slice(0, firstRemovedPanel))
         if (activePanelIndex >= firstRemovedPanel) navigateToPanel(firstRemovedPanel - 1)
       }
-      addStatusMessage('学習範囲の印を削除しました')
     } catch (error) {
       console.error('学習範囲の印を削除できませんでした:', error)
-      addStatusMessage('❌ 学習範囲の印を削除できませんでした')
     }
   }
 
@@ -1672,10 +1593,8 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       const restored = await getPDFStudyMarker(snapshot.marker.id)
       if (!restored) throw new Error('学習範囲が見つかりません')
       setStudyTraces(previous => [...previous.filter(trace => trace.id !== restored.id), restored])
-      addStatusMessage('学習範囲の印を元に戻しました')
     } catch (error) {
       console.error('学習範囲の印を元に戻せませんでした:', error)
-      addStatusMessage('❌ 学習範囲の印を元に戻せませんでした')
     }
   }
 
@@ -2046,14 +1965,8 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
           toggleEraserMode={toggleEraserMode}
           eraserSize={eraserSize}
           setEraserSize={setEraserSize}
-          onUndo={handleUndo}
-          onClear={clearDrawing}
-          onClearAll={clearAllDrawings}
           onGrade={isOnAnswerPanel ? handleGradeFromToolbar : undefined}
           submissionKind={isOnAnswerPanel && activePanel.source === 'grading' ? 'ask' : 'grade'}
-          canUndoAnswer={isOnAnswerPanel ? canUndoAnswer : undefined}
-          onUndoAnswer={isOnAnswerPanel ? () => answerPanelRef.current?.undo() : undefined}
-          onClearAnswer={isOnAnswerPanel ? () => answerPanelRef.current?.clear() : undefined}
           onDeleteStudyTrace={activeTraceId ? deleteActiveStudyTrace : undefined}
           selectedModel={selectedModel}
           setSelectedModel={setSelectedModel}
@@ -2088,7 +2001,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
                   textFontSize={textFontSize}
                   textDirection={textDirection}
                   eraserSize={eraserSize}
-                  onCanUndoChange={i === activePanelIndex ? setCanUndoAnswer : undefined}
                 />
               )}
               {panel.type === 'grading' && (
