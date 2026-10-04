@@ -19,9 +19,10 @@ npm run deploy:server
 stagingと本番の両方で次を確認する。
 
 - `GET /api/health` と `GET /api/models` が200を返す。
-- 空のJSON `{}` を `POST /api/grade-work`、`POST /api/ask-question`、`POST /api/book/ask` へ送ると、
+- 空のJSON `{}` を `POST /api/grade-work`、`POST /api/ask-question`、`POST /api/book/ask`、`POST /api/book/reference-media` へ送ると、
   各API固有の入力検証エラー（400）を返す。404はルート欠落なので公開を進めない。この確認ではGeminiを呼び出さない。
 - stagingでは実際の教材で採点・追加質問・本の質問も確認する。入力検証だけではAI応答の動作確認にはならない。
+- 参考資料APIも質問と回答で確認し、画像URLの取得・出典・作者・ライセンスを確認する。画像が取得できなくても回答APIは独立して動作する。
 
 `deploy:server` と `deploy:server:staging` はどちらも先にソースを準備する。
 既存のシェルスクリプトもこのコマンドを呼ぶ。
