@@ -29,13 +29,13 @@ Google Cloud CLIで対象プロジェクトへのログインとデプロイ権�
 APIキー等は既存のSecret Managerから取得する。既存の他の環境変数は維持する。
 
 `prepare:server` は生成用ディレクトリ `.cloud-run` を作り直し、
-サーバー、共通の採点定義、専用の依存定義・lockfile、Dockerfileのみをコピーする。
+サーバーの `src/`・`tsconfig.json`・依存定義・lockfileと、共通の採点定義、`server/Dockerfile` のみをコピーする。
 共通定義は兄弟サブモジュールの現在のチェックアウトから取得する。
 公開時はメタリポジトリが固定しているコミットを確認すること。
 ルートの `gcloud run deploy --source .` は使用せず、
 必ず `--source .cloud-run` を使用する。`.env` や認証ファイルはコピーされない。
 
-Docker内で `npm ci` とビルドを実行し、共通定義をサーバーへまとめる。
+Docker内の `server/` で `npm ci` とビルドを実行し、共通定義を `dist/index.js` にまとめる。
 実行イメージはサーバー用依存だけを含み、TypeScript実行ツールやフロント資産を必要としない。
 依存を更新する場合は `server/package.json` を変更し、
 `npm install --package-lock-only --prefix server` でlockfileも更新する。
