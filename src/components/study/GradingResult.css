@@ -29,6 +29,10 @@
   pointer-events: none;
 }
 
+.grading-selection-mode .result-inner {
+  cursor: crosshair;
+}
+
 /* ===== 問題リスト ===== */
 .problems-list {
   display: flex;

@@ -42,6 +42,55 @@ vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname,
 }).outputText, { exports: panelWheelExports });
 const { getPanelWheelDestination } = panelWheelExports;
 
+function answerWheelHarness() {
+    class Element { constructor(control = false) { this.control = control; } closest() { return this.control ? this : null; } }
+    const viewportRef = { current: { zoom: 1, panOffset: { x: 0, y: 0 } } };
+    const updates = [];
+    const run = handler('handleWheelNative', { Element, viewportRef,
+        container: { clientHeight: 500, getBoundingClientRect: () => ({ left: 100, top: 80 }) },
+        setZoom: value => updates.push(['zoom', value]), setPanOffset: value => updates.push(['pan', value]) }, answerAst);
+    const send = (options = {}) => {
+        let prevented = false, stopped = false;
+        run({ target: new Element(), buttons: 0, deltaY: 100, deltaMode: 0, clientX: 300, clientY: 280,
+            preventDefault() { prevented = true; }, stopPropagation() { stopped = true; }, ...options });
+        return { prevented, stopped };
+    };
+    return { viewportRef, updates, send, control: () => new Element(true) };
+}
+
+test('writing-area wheel leaves text editors and consumed or drawing events alone', () => {
+    const h = answerWheelHarness();
+    for (const options of [{ target: h.control() }, { target: h.control(), ctrlKey: true },
+        { defaultPrevented: true }, { buttons: 1 }, { deltaY: 0 }, { deltaY: NaN }]) {
+        assert.deepEqual(h.send(options), { prevented: false, stopped: false });
+        assert.equal(h.updates.length, 0);
+    }
+    assert.deepEqual(h.send({ deltaY: 3, deltaMode: 1 }), { prevented: true, stopped: true });
+    assert.equal(h.viewportRef.current.panOffset.y, -48);
+    h.send({ deltaY: 1, deltaMode: 2 });
+    assert.equal(h.viewportRef.current.panOffset.y, -548);
+});
+
+test('rapid writing-area wheel events accumulate and keep the zoom focus stable', () => {
+    const h = answerWheelHarness();
+    h.send({ deltaY: 10 });
+    h.send({ deltaY: 20 });
+    assert.equal(h.viewportRef.current.panOffset.y, -30);
+    const focus = () => {
+        const { zoom, panOffset } = h.viewportRef.current;
+        return [(200 - panOffset.x) / zoom, (200 - panOffset.y) / zoom];
+    };
+    const before = focus();
+    h.send({ deltaY: -100, ctrlKey: true });
+    h.send({ deltaY: -100, metaKey: true });
+    assert.ok(Math.abs(h.viewportRef.current.zoom - 1.21) < 1e-10);
+    focus().forEach((value, index) => assert.ok(Math.abs(value - before[index]) < 1e-10));
+    for (let i = 0; i < 30; i++) h.send({ deltaY: -100, ctrlKey: true });
+    assert.equal(h.viewportRef.current.zoom, 5);
+    for (let i = 0; i < 50; i++) h.send({ deltaY: 100, ctrlKey: true });
+    assert.equal(h.viewportRef.current.zoom, 0.2);
+});
+
 test('deleting an active answer flushes the latest strokes before cutting its route and keeps another PDF mark', async () => {
     const answer = { strokes: [{ points: [[10, 20], [30, 40]] }], texts: [{ text: '最後の解答' }] };
     let traces = [{ id: 'root' }, { id: 'other' }];
@@ -803,4 +852,57 @@ test('answer export preserves the selected answer source across async panel navi
     resolve('image');
     await pending;
     assert.deepEqual(pages, [5]);
+});
+
+test('answer selection leaves scrollbars and controls native while selecting within the text viewport', () => {
+    class Element { constructor(control = false) { this.control = control; } closest() { return this.control ? this : null; } }
+    const viewport = { clientLeft: 0, clientTop: 0, clientWidth: 385, clientHeight: 460,
+        getBoundingClientRect: () => ({ left: 100, top: 80, width: 400, height: 460 }) };
+    const panel = { getBoundingClientRect: () => ({ left: 100, top: 80, width: 400, height: 500 }),
+        querySelector: () => viewport };
+    const capturing = { current: false }, start = { current: null }, selection = { current: null };
+    const adapters = { Element, gradingPanelRef: { current: panel }, isGradingCapturingRef: capturing,
+        gradingCaptureStartRef: start, gradingCaptureRectRef: selection, setGradingCaptureRect() {},
+        getResultViewportBounds: handler('getResultViewportBounds', {}), getStudyTraceAtPoint: () => null };
+    const begin = handler('handleGradingCaptureStart', adapters);
+    let prevented = 0;
+    const down = (clientX, clientY, target = new Element()) => begin({
+        button: 0, clientX, clientY, target, preventDefault() { prevented++; },
+    });
+    for (const [x, y, target] of [[492, 200], [485, 200], [150, 555], [99, 180], [150, 180, new Element(true)]]) {
+        down(x, y, target);
+        assert.equal(capturing.current, false);
+        assert.equal(selection.current, null);
+        assert.equal(prevented, 0);
+    }
+    // An RTL scrollbar occupies the left edge and must also retain native dragging.
+    viewport.clientLeft = 15;
+    down(108, 180);
+    assert.equal(capturing.current, false);
+    assert.equal(prevented, 0);
+    viewport.clientLeft = 0;
+    down(150, 180);
+    assert.equal(capturing.current, true);
+    assert.equal(prevented, 1);
+    assert.deepEqual({ ...start.current }, { x: 50, y: 100 });
+    handler('handleGradingCaptureMove', adapters)({ clientX: 900, clientY: 900 });
+    assert.deepEqual({ ...selection.current }, { x: 50, y: 100, width: 335, height: 360 });
+});
+
+test('scrolling discards an unfinished answer selection without creating a follow-up', async () => {
+    const capturing = { current: true }, start = { current: { x: 20, y: 30 } };
+    const selection = { current: { x: 20, y: 30, width: 100, height: 50 } };
+    const changes = [];
+    const adapters = { isGradingCapturingRef: capturing, gradingCaptureStartRef: start,
+        gradingCaptureRectRef: selection, setGradingCaptureRect: value => changes.push(value) };
+    const scroll = handler('handleGradingCaptureScroll', adapters);
+    scroll();
+    assert.equal(capturing.current, false);
+    assert.equal(start.current, null);
+    assert.equal(selection.current, null);
+    assert.deepEqual(changes, [null]);
+    await handler('handleGradingCaptureEnd', { ...adapters, panelStack: [{ type: 'grading' }], activePanelIndex: 0,
+        gradingPanelRef: { current: {} }, pushPanel: () => assert.fail('Scrolling must not create a question') })();
+    scroll();
+    assert.deepEqual(changes, [null]);
 });
