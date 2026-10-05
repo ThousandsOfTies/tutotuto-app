@@ -1489,7 +1489,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
 
   const isOnAnswerPanel = activePanel?.type === 'answer'
   const isPenActive = isOnAnswerPanel ? !isEraserMode && !isTextMode : isDrawingMode
-  const activeTraceId = activePanel?.type !== 'pdf' ? activePanel?.traceId : undefined
   const activeGradingHasBranches = activePanel?.type === 'grading' &&
     (studyTraces.find(item => item.id === activePanel.traceId)?.followUps ?? [])
       .filter(item => item.parentId === (activePanel.nodeId ?? activePanel.traceId)).length > 1
@@ -1624,11 +1623,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
     } catch (error) {
       console.error('学習範囲の印を元に戻せませんでした:', error)
     }
-  }
-
-  const deleteActiveStudyTrace = async () => {
-    if (!activeTraceId || isGrading || traceUndo.busy || !confirm('PDF上の印と、そこから開く解答・採点履歴（追加の質問を含む）を削除しますか？ 採点履歴一覧の記録は残ります。')) return
-    await deleteStudyTrace(activeTraceId)
   }
 
   const pdfRegionMarkers = [
@@ -1995,7 +1989,6 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
           setEraserSize={setEraserSize}
           onGrade={isOnAnswerPanel ? handleGradeFromToolbar : undefined}
           submissionKind={isOnAnswerPanel && activePanel.source === 'grading' ? 'ask' : 'grade'}
-          onDeleteStudyTrace={activeTraceId ? deleteActiveStudyTrace : undefined}
           selectedModel={selectedModel}
           setSelectedModel={setSelectedModel}
           availableModels={availableModels}
