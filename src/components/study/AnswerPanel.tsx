@@ -714,6 +714,7 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
             className="answer-text-editor"
             initialText={editingText.initialText}
             style={{
+              position: 'absolute',
               left: editingText.x,
               top: editingText.y,
             }}
