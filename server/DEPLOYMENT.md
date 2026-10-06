@@ -19,6 +19,7 @@ npm run deploy:server
 stagingと本番の両方で次を確認する。
 
 - `GET /api/health` と `GET /api/models` が200を返す。
+- `POST /api/book/ocr` は410を返し、AIを呼ばない。本の索引はテキスト入力の `/api/book/embed` のみで作成する。
 - 空のJSON `{}` を `POST /api/grade-work`、`POST /api/ask-question`、`POST /api/book/ask`、`POST /api/book/reference-media` へ送ると、
   各API固有の入力検証エラー（400）を返す。404はルート欠落なので公開を進めない。この確認ではGeminiを呼び出さない。
 - stagingでは実際の教材で採点・追加質問・本の質問も確認する。入力検証だけではAI応答の動作確認にはならない。
