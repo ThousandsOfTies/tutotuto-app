@@ -20,9 +20,10 @@ stagingと本番の両方で次を確認する。
 
 - `GET /api/health` と `GET /api/models` が200を返す。
 - `POST /api/book/ocr` は410を返し、AIを呼ばない。本の索引はテキスト入力の `/api/book/embed` のみで作成する。
-- 空のJSON `{}` を `POST /api/grade-work`、`POST /api/ask-question`、`POST /api/book/ask`、`POST /api/book/reference-media` へ送ると、
+- 空のJSON `{}` を `POST /api/grade-work`、`POST /api/ask-question`、`POST /api/book/ask`、`POST /api/book/ask-agent`、`POST /api/book/reference-media` へ送ると、
   各API固有の入力検証エラー（400）を返す。404はルート欠落なので公開を進めない。この確認ではGeminiを呼び出さない。
 - stagingでは実際の教材で採点・追加質問・本の質問も確認する。入力検証だけではAI応答の動作確認にはならない。
+- `/api/book/ask-agent` はAIの本文要求、ブラウザの本文応答、継続後の回答を確認する。最大2往復で止まり、取得したページだけが回答の参照ページに含まれることを確認する。
 - 参考資料APIも質問と回答で確認し、画像URLの取得・出典・作者・ライセンスを確認する。画像が取得できなくても回答APIは独立して動作する。
 
 `deploy:server` と `deploy:server:staging` はどちらも先にソースを準備する。
@@ -31,13 +32,14 @@ Google Cloud CLIで対象プロジェクトへのログインとデプロイ権�
 APIキー等は既存のSecret Managerから取得する。既存の他の環境変数は維持する。
 
 `prepare:server` は生成用ディレクトリ `.cloud-run` を作り直し、
-サーバーの `src/`・`tsconfig.json`・依存定義・lockfileと、共通の採点定義、`server/Dockerfile` のみをコピーする。
+サーバーの `src/`・`tsconfig.json`・依存定義・lockfileと、`shared/` の本文要求の通信形式、共通の採点定義、`server/Dockerfile` のみをコピーする。
 共通定義は兄弟サブモジュールの現在のチェックアウトから取得する。
 公開時はメタリポジトリが固定しているコミットを確認すること。
 ルートの `gcloud run deploy --source .` は使用せず、
 必ず `--source .cloud-run` を使用する。`.env` や認証ファイルはコピーされない。
 
 Docker内の `server/` で `npm ci` とビルドを実行し、共通定義を `dist/index.js` にまとめる。
+Dockerのビルド段階でも `app/shared` をコピーし、ブラウザとサーバーで同じ通信形式・上限を使う。
 実行イメージはサーバー用依存だけを含み、TypeScript実行ツールやフロント資産を必要としない。
 依存を更新する場合は `server/package.json` を変更し、
 `npm install --package-lock-only --prefix server` でlockfileも更新する。
