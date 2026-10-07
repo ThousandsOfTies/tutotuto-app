@@ -58,6 +58,8 @@ export default defineConfig(({ mode }) => {
       react(),
       viteStaticCopy({
         targets: [
+          { src: 'src/i18n/locales/ja.json', dest: 'locales/ja', rename: 'translation.json' },
+          { src: 'src/i18n/locales/en.json', dest: 'locales/en', rename: 'translation.json' },
           {
             src: 'node_modules/pdfjs-dist/build/pdf.worker.min.mjs',
             dest: '',
@@ -92,7 +94,7 @@ export default defineConfig(({ mode }) => {
           navigateFallbackDenylist: [/manage\.html/], // <--- manage.htmlをフォールバックから除外
           // version.json はネットワークから最新版を確認するため、precacheしない。
           globIgnores: ['**/opencv*.js', '**/version.json'],
-          globPatterns: ['**/*.{js,css,html,png,svg,woff,woff2}'],
+          globPatterns: ['**/*.{js,css,html,json,png,svg,woff,woff2}'],
           maximumFileSizeToCacheInBytes: 15 * 1024 * 1024,
           runtimeCaching: [
             {

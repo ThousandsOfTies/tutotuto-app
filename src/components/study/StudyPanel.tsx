@@ -1,3 +1,6 @@
+import appMessages from '../../i18n/locales/ja.json'
+import { localizeAppError } from '../../i18n/errorMessages'
+import { useAppTranslation } from '../../i18n'
 
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -83,6 +86,7 @@ const getResultViewportBounds = (panel: HTMLElement) => {
 
 const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
   const { t, i18n } = useTranslation()
+  const { t: appT } = useAppTranslation()
   // Refs
   const paneARef = useRef<PDFPaneHandle>(null)
   const paneBRef = useRef<PDFPaneHandle>(null)
@@ -301,8 +305,8 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
   const getPanelLabel = (panel: PanelData): string => {
     switch (panel.type) {
       case 'pdf': return 'PDF'
-      case 'answer': return panel.source === 'grading' ? '質問記入' : '解答記入'
-      case 'grading': return panel.result.pageType === 'follow-up-question' ? '質問への回答' : '採点結果'
+      case 'answer': return panel.source === 'grading' ? appT('panel.question') : appT('panel.answer')
+      case 'grading': return panel.result.pageType === 'follow-up-question' ? appT('panel.questionAnswer') : appT('panel.grading')
     }
   }
 
@@ -319,7 +323,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       const trace = await getPDFStudyMarker(traceId)
       if (!trace) return
       if (nodeId && nodeId !== traceId) {
-        if (!trace.followUps?.some(item => item.id === nodeId)) throw new Error('追加の質問が見つかりません')
+        if (!trace.followUps?.some(item => item.id === nodeId)) throw new Error(appMessages.errors.questionMissing)
         await savePDFStudyMarker({
           ...trace,
           followUps: trace.followUps.map(item => item.id === nodeId ? { ...item, answer } : item),
@@ -352,7 +356,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
     regions: PDFStudyRegion[],
     captureLayout?: PDFStudyMarkerRecord['captureLayout'],
   ): Promise<string> => {
-    if (!pdfDoc || regions.length === 0) throw new Error('PDFを開けません')
+    if (!pdfDoc || regions.length === 0) throw new Error(appMessages.errors.pdfOpen)
     const crops: HTMLCanvasElement[] = []
     for (const region of regions) {
       const page = await pdfDoc.getPage(region.pageNumber)
@@ -361,7 +365,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       pageCanvas.width = Math.ceil(viewport.width)
       pageCanvas.height = Math.ceil(viewport.height)
       const pageContext = pageCanvas.getContext('2d')
-      if (!pageContext) throw new Error('PDFを描画できません')
+      if (!pageContext) throw new Error(appMessages.errors.pdfRender)
       await page.render({ canvasContext: pageContext, viewport }).promise
       const crop = document.createElement('canvas')
       crop.width = Math.max(1, Math.round(region.width * pageCanvas.width))
@@ -382,7 +386,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
     result.width = useCaptureLayout ? captureLayout.width : Math.max(...crops.map(crop => crop.width))
     result.height = useCaptureLayout ? captureLayout.height : crops.reduce((sum, crop) => sum + crop.height, 0)
     const context = result.getContext('2d')
-    if (!context) throw new Error('問題画像を作成できません')
+    if (!context) throw new Error(appMessages.errors.problemImage)
     context.fillStyle = '#ffffff'
     context.fillRect(0, 0, result.width, result.height)
     let y = 0
@@ -400,11 +404,11 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
 
   const loadFollowUpQuestionImage = async (traceId: string, nodeId: string): Promise<string> => {
     const blob = await getPDFStudyAsset(traceId, nodeId, 'question')
-    if (!blob) throw new Error('追加の質問画像が見つかりません')
+    if (!blob) throw new Error(appMessages.errors.questionImageMissing)
     return new Promise((resolve, reject) => {
       const reader = new FileReader()
       reader.onload = () => resolve(reader.result as string)
-      reader.onerror = () => reject(new Error('追加の質問画像を開けません'))
+      reader.onerror = () => reject(new Error(appMessages.errors.questionImageOpen))
       reader.readAsDataURL(blob)
     })
   }
@@ -423,10 +427,10 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       const children = (trace.followUps ?? []).filter(item => item.parentId === parentId)
       const child = nextId ? children.find(item => item.id === nextId) : children.length === 1 ? children[0] : undefined
       if (!child) {
-        if (nextId) throw new Error('選択した質問が見つかりません')
+        if (nextId) throw new Error(appMessages.errors.selectedQuestionMissing)
         break
       }
-      if (visited.has(child.id)) throw new Error('質問履歴の接続が不正です')
+      if (visited.has(child.id)) throw new Error(appMessages.errors.questionHistoryInvalid)
       visited.add(child.id)
       panels.push({
         type: 'answer',
@@ -455,7 +459,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
     try {
       await pendingAnswerWritesRef.current.get(traceId)?.catch(() => {})
       const trace = await getPDFStudyMarker(traceId)
-      if (!trace || trace.pdfId !== pdfId) throw new Error('学習範囲が見つかりません')
+      if (!trace || trace.pdfId !== pdfId) throw new Error(appMessages.errors.rangeMissing)
       setStudyTraces(previous => previous.map(item => item.id === traceId ? trace : item))
       const paperOrientation = await getPDFPageOrientation(trace.sourcePageNumbers[0])
       const answerPanel: PanelData = {
@@ -494,7 +498,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
     try {
       await pendingAnswerWritesRef.current.get(sourcePanel.traceId)?.catch(() => {})
       const trace = await getPDFStudyMarker(sourcePanel.traceId)
-      if (!trace || trace.pdfId !== pdfId) throw new Error('学習範囲が見つかりません')
+      if (!trace || trace.pdfId !== pdfId) throw new Error(appMessages.errors.rangeMissing)
       setStudyTraces(previous => previous.map(item => item.id === trace.id ? trace : item))
       const panels = panelStack.slice(0, activePanelIndex + 1)
       const questionPanelIndex = panels.length
@@ -852,11 +856,11 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       const html2canvas = (await import('html2canvas')).default
       const panel = gradingPanelRef.current
       const resultInner = panel.querySelector('.result-inner') as HTMLElement | null
-      if (!resultInner) throw new Error('採点結果の表示領域が見つかりません')
+      if (!resultInner) throw new Error(appMessages.errors.gradingAreaMissing)
       const panelRect = panel.getBoundingClientRect()
       const innerRect = resultInner.getBoundingClientRect()
       const geometry = getGradingCaptureGeometry(captureRect, panelRect, innerRect)
-      if (!geometry) throw new Error('採点結果の内側を選択してください')
+      if (!geometry) throw new Error(appMessages.errors.selectInsideGrading)
       const overlay = panel.querySelector('.grading-capture-overlay') as HTMLElement | null
       const markers = panel.querySelector('.grading-study-markers') as HTMLElement | null
       const previousDisplay = overlay?.style.display
@@ -898,7 +902,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       let nodeId: string | undefined
       if (sourcePanel.traceId) {
         const questionBlob = await new Promise<Blob>((resolve, reject) => {
-          cropCanvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('質問画像を保存できません')), 'image/png')
+          cropCanvas.toBlob(blob => blob ? resolve(blob) : reject(new Error(appMessages.errors.questionImageSave)), 'image/png')
         })
         nodeId = `followup_${crypto.randomUUID()}`
         const followUp: PDFStudyFollowUp = {
@@ -1091,24 +1095,24 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       await new Promise((resolve, reject) => {
         img.onload = () => {
           if (img.width < 50 || img.height < 50) {
-            setGradingError('選択範囲が小さすぎます。もう少し大きく選択してください。')
+            setGradingError(appMessages.errors.selectionSmall)
             setIsGrading(false)
-            reject(new Error('Image too small'))
+            reject(new Error(appMessages.errors.imageTooSmall))
           } else {
             resolve(undefined)
           }
         }
         img.onerror = () => {
-          setGradingError('画像の読み込みに失敗しました。')
+          setGradingError(appMessages.errors.imageLoadFailed)
           setIsGrading(false)
-          reject(new Error('Image load error'))
+          reject(new Error(appMessages.errors.imageLoad))
         }
       })
 
       // 採点結果からの追加質問には採点プロンプトを使わない。
       const parentPanel = panelStack[activePanelIndex - 1]
       if (isFollowUpQuestion && parentPanel?.type !== 'grading') {
-        throw new Error('質問元の採点結果が見つかりません')
+        throw new Error(appMessages.errors.questionSourceMissing)
       }
       const startTime = Date.now()
       const model = selectedModel !== 'default' ? selectedModel : undefined
@@ -1119,8 +1123,8 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       const clientResponseTimeSeconds = parseFloat(((endTime - startTime) / 1000).toFixed(1))
 
       if (!response.success) {
-        setGradingError(response.error || (isFollowUpQuestion ? '質問への回答に失敗しました' : '採点に失敗しました'))
-        throw new Error(response.error || (isFollowUpQuestion ? '質問への回答に失敗しました' : '採点に失敗しました'))
+        setGradingError(response.error || (isFollowUpQuestion ? appMessages.errors.questionFailed : appMessages.errors.gradingFailed))
+        throw new Error(response.error || (isFollowUpQuestion ? appMessages.errors.questionFailed : appMessages.errors.gradingFailed))
       }
 
       setGradingError(null)
@@ -1138,14 +1142,14 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
         try {
           await pendingAnswerWritesRef.current.get(traceId)
           const trace = await getPDFStudyMarker(traceId)
-          if (!trace) throw new Error('学習範囲が見つかりません')
+          if (!trace) throw new Error(appMessages.errors.rangeMissing)
           const grading = {
             result: gradingResult,
             modelName: response.modelName ?? null,
             responseTime: response.responseTime ?? clientResponseTimeSeconds,
           }
           if (nodeId && nodeId !== traceId && !trace.followUps?.some(item => item.id === nodeId)) {
-            throw new Error('追加の質問が見つかりません')
+            throw new Error(appMessages.errors.questionMissing)
           }
           const updated: PDFStudyMarkerRecord = nodeId && nodeId !== traceId
             ? { ...trace, followUps: trace.followUps!.map(item => item.id === nodeId ? { ...item, grading } : item) }
@@ -1618,7 +1622,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       if (!snapshot) return
       snapshot.removedNodeIds.forEach(id => deletedStudyNodeIdsRef.current.delete(id))
       const restored = await getPDFStudyMarker(snapshot.marker.id)
-      if (!restored) throw new Error('学習範囲が見つかりません')
+      if (!restored) throw new Error(appMessages.errors.rangeMissing)
       setStudyTraces(previous => [...previous.filter(trace => trace.id !== restored.id), restored])
     } catch (error) {
       console.error('学習範囲の印を元に戻せませんでした:', error)
@@ -1667,7 +1671,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
                 marginBottom: '16px',
                 margin: '0 auto'
               }} />
-              <p>PDFを読み込み中...</p>
+              <p>{appT('panel.pdfLoading')}</p>
               <style>{`
                 @keyframes spin {
                   0% { transform: rotate(0deg); }
@@ -1677,7 +1681,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
             </div>
           ) : (
             <div style={{ textAlign: 'center', padding: '20px' }}>
-              <p style={{ color: '#e74c3c', marginBottom: '16px', fontWeight: 'bold' }}>PDFの読み込みに失敗しました</p>
+              <p style={{ color: '#e74c3c', marginBottom: '16px', fontWeight: 'bold' }}>{appT('panel.pdfFailed')}</p>
               <p style={{ fontSize: '12px', color: '#666', marginBottom: '20px', maxWidth: '300px', wordBreak: 'break-all' }}>{pdfError}</p>
               <button
                 onClick={() => setRetryCount(c => c + 1)}
@@ -1692,8 +1696,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
                   boxShadow: '0 2px 5px rgba(0,0,0,0.2)'
                 }}
               >
-                再読み込み
-              </button>
+                {appT('panel.reload')}</button>
             </div>
           )}
         </div>
@@ -1935,7 +1938,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
                   initialText: annotation.text
                 })
               }}
-              title={isClickable ? 'クリックで編集（テキストを消して確定で削除）' : ''}
+              title={isClickable ? appT('panel.editAnnotation') : ''}
             >
               {annotation.text}
             </div>
@@ -2078,7 +2081,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
           <PanelForwardButton
             canGoForward={canGoForward}
             disabled={panelNavigationBusy || isNavigating}
-            label="次の画面へ"
+            label={appT('panel.forward')}
             onNext={() => navigatePanel(1)}
           />
         </div>
@@ -2124,7 +2127,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
             maxWidth: '400px',
             textAlign: 'center'
           }}>
-            ❌ {gradingError}
+            ❌ {localizeAppError(gradingError, appT)}
           </div>
         )}
       </div>

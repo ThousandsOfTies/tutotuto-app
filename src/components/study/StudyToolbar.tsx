@@ -1,3 +1,4 @@
+import { useAppTranslation } from '../../i18n'
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FiHome, FiCheckCircle, FiMessageCircle, FiLoader, FiType, FiEdit2 } from 'react-icons/fi';
@@ -95,6 +96,7 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
     defaultModelName,
 }) => {
     const { t } = useTranslation();
+  const { t: appT } = useAppTranslation()
 
     // Popups visibility state
     const [showTextPopup, setShowTextPopup] = useState(false);
@@ -155,7 +157,7 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
             {/* 戻るボタン */}
             {onBack && (
                 <>
-                    <button onClick={onBack} title="ホームに戻る" style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                    <button onClick={onBack} title={appT('toolbar.home')} style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
                         <FiHome size={20} />
                     </button>
 
@@ -206,7 +208,7 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
                         <button
                             onClick={handlePenClick}
                             className={isDrawingMode ? 'active' : ''}
-                            title={isDrawingMode ? 'ペンモード ON（クリックで設定）' : 'ペンモード OFF'}
+                            title={isDrawingMode ? appT('toolbar.penOn') : appT('toolbar.penOff')}
                         >
                             <FiEdit2 size={20} color={isDrawingMode ? penColor : 'currentColor'} />
                         </button>
@@ -215,7 +217,7 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
                         {isDrawingMode && showPenPopup && (
                             <div className="tool-popup">
                                 <div className="popup-row">
-                                    <label>色:</label>
+                                    <label>{appT('toolbar.colorLabel')}</label>
                                     <input
                                         type="color"
                                         value={penColor}
@@ -224,7 +226,7 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
                                     />
                                 </div>
                                 <div className="popup-row">
-                                    <label>太さ:</label>
+                                    <label>{appT('toolbar.width')}</label>
                                     <input
                                         type="range"
                                         min="1"
@@ -251,7 +253,7 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
                         <button
                             onClick={handleEraserClick}
                             className={isEraserMode ? 'active' : ''}
-                            title={isEraserMode ? '消しゴムモード ON（クリックで設定）' : '消しゴムモード OFF'}
+                            title={isEraserMode ? appT('toolbar.eraserOn') : appT('toolbar.eraserOff')}
                         >
                             <BiEraser size={20} className="icon-scale-13" />
                         </button>
@@ -260,7 +262,7 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
                         {isEraserMode && showEraserPopup && (
                             <div className="tool-popup">
                                 <div className="popup-row">
-                                    <label>サイズ:</label>
+                                    <label>{appT('toolbar.size')}</label>
                                     <input
                                         type="range"
                                         min="0"
@@ -282,7 +284,7 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
                         <button
                             onClick={handleTextClick}
                             className={isTextMode ? 'active' : ''}
-                            title={isTextMode ? 'テキストモード ON（クリックで設定）' : 'テキストモード OFF'}
+                            title={isTextMode ? appT('toolbar.textOn') : appT('toolbar.textOff')}
                         >
                             <FiType size={20} />
                         </button>
@@ -291,7 +293,7 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
                         {isTextMode && showTextPopup && (
                             <div className="tool-popup" style={{ minWidth: '180px' }}>
                                 <div className="popup-row">
-                                    <label>サイズ:</label>
+                                    <label>{appT('toolbar.size')}</label>
                                     <input
                                         type="range"
                                         min="10"
@@ -303,19 +305,19 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
                                     <span>{textFontSize}px</span>
                                 </div>
                                 <div className="popup-row">
-                                    <label>方向:</label>
+                                    <label>{appT('toolbar.direction')}</label>
                                     <select
                                         value={textDirection}
                                         onChange={(e) => setTextDirection(e.target.value as TextDirection)}
                                         style={{ padding: '4px', borderRadius: '4px' }}
                                     >
-                                        <option value="horizontal">横書き (Z型)</option>
-                                        <option value="vertical-rl">縦書き右始 (N型)</option>
-                                        <option value="vertical-lr">縦書き左始</option>
+                                        <option value="horizontal">{appT('toolbar.horizontal')}</option>
+                                        <option value="vertical-rl">{appT('toolbar.verticalRight')}</option>
+                                        <option value="vertical-lr">{appT('toolbar.verticalLeft')}</option>
                                     </select>
                                 </div>
                                 <div className="popup-row">
-                                    <label>色:</label>
+                                    <label>{appT('toolbar.colorLabel')}</label>
                                     <input
                                         type="color"
                                         value={penColor}
@@ -332,8 +334,8 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
                             <div className="divider" style={{ margin: '0 4px' }}></div>
                             <button
                                 onClick={toggleSplitView}
-                                title={isSplitView ? 'A/Bを左右入れ替え' : '2画面表示 (Split View)'}
-                                aria-label={isSplitView ? 'A/Bを左右入れ替え' : '2画面表示'}
+                                title={isSplitView ? appT('toolbar.swap') : appT('toolbar.split')}
+                                aria-label={isSplitView ? appT('toolbar.swap') : appT('toolbar.splitLabel')}
                                 className={isSplitView ? 'active' : ''}
                             >
                                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -344,8 +346,8 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
                             <button
                                 className={`tab-switcher-btn ${!isSplitView ? 'active' : ''}`}
                                 onClick={toggleActiveTab}
-                                title={isSplitView ? 'シングルビューへ切替' : 'A/B 切替'}
-                                aria-label={isSplitView ? 'シングルビューへ切替' : 'A/B 切替'}
+                                title={isSplitView ? appT('toolbar.single') : appT('toolbar.switchPane')}
+                                aria-label={isSplitView ? appT('toolbar.single') : appT('toolbar.switchPane')}
                                 style={{ minWidth: '45px' }}
                             >
                                 <span style={{
@@ -385,8 +387,8 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
                                 onClick={onGrade}
                                 disabled={isGrading}
                                 className="btn-submit"
-                                title={submissionKind === 'ask' ? '先生に質問する' : '採点する'}
-                                aria-label={submissionKind === 'ask' ? '先生に質問する' : '採点する'}
+                                title={submissionKind === 'ask' ? appT('toolbar.ask') : appT('toolbar.grade')}
+                                aria-label={submissionKind === 'ask' ? appT('toolbar.ask') : appT('toolbar.grade')}
                                 style={{
                                     cursor: isGrading ? 'wait' : 'pointer',
                                     opacity: isGrading ? 0.6 : 1,

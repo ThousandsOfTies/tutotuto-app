@@ -1,3 +1,4 @@
+import { useAppTranslation } from './i18n'
 import { useState, useEffect } from 'react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
 import AdminPanel from '@home-teacher/common/components/admin/AdminPanel'
@@ -9,6 +10,7 @@ import { useAppInitializer } from '@home-teacher/common/hooks/useAppInitializer'
 type AppView = 'admin' | 'viewer' | 'editor'
 
 function App() {
+  const { t: appT } = useAppTranslation()
   const [currentView, setCurrentView] = useState<AppView>('admin')
   const [selectedPDF, setSelectedPDF] = useState<PDFFileRecord | null>(null)
 
@@ -121,7 +123,7 @@ function App() {
       height: '100vh',
       fontSize: '1.5rem',
       color: '#3498db'
-    }}>Loading...</div>
+    }}>{appT('app.loading')}</div>
   }
 
   return (
@@ -133,7 +135,7 @@ function App() {
           onEditPDF={handleEditPDF}
           hasUpdate={needRefresh || manualUpdate}
           onUpdate={handleUpdate}
-          studyTabLabel="Study"
+          studyTabLabel={appT('app.studyTab')}
         />
       ) : currentView === 'viewer' && selectedPDF ? (
         <StudyPanel
@@ -150,7 +152,7 @@ function App() {
           onBack={handleBackToAdmin}
         />
       ) : (
-        <div>No PDF selected</div>
+        <div>{appT('app.noPDF')}</div>
       )}
     </div>
   )

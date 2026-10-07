@@ -25,6 +25,7 @@ function handler(name, adapters, componentAst = ast) {
         compilerOptions: { target: ts.ScriptTarget.ES2022 }
     }).outputText;
     return vm.runInNewContext(code + '\nrun', {
+        appMessages: require('../src/i18n/locales/ja.json'),
         traceUndo: { busy: false }, deletedStudyNodeIdsRef: { current: new Set() }, handledTracePointerRef: { current: false },
         ...adapters,
     });
