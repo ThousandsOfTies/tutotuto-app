@@ -1,3 +1,4 @@
+const { answerWheelHarness, CanvasUndoHistory } = require('../../home-teacher-common/tests/helpers/answerCanvasHarness.cjs');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -43,21 +44,7 @@ vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname,
 }).outputText, { exports: panelWheelExports });
 const { getPanelWheelDestination } = panelWheelExports;
 
-function answerWheelHarness() {
-    class Element { constructor(control = false) { this.control = control; } closest() { return this.control ? this : null; } }
-    const viewportRef = { current: { zoom: 1, panOffset: { x: 0, y: 0 } } };
-    const updates = [];
-    const run = handler('handleWheelNative', { Element, viewportRef,
-        container: { clientHeight: 500, getBoundingClientRect: () => ({ left: 100, top: 80 }) },
-        setZoom: value => updates.push(['zoom', value]), setPanOffset: value => updates.push(['pan', value]) }, answerAst);
-    const send = (options = {}) => {
-        let prevented = false, stopped = false;
-        run({ target: new Element(), buttons: 0, deltaY: 100, deltaMode: 0, clientX: 300, clientY: 280,
-            preventDefault() { prevented = true; }, stopPropagation() { stopped = true; }, ...options });
-        return { prevented, stopped };
-    };
-    return { viewportRef, updates, send, control: () => new Element(true) };
-}
+
 
 test('writing-area wheel leaves text editors and consumed or drawing events alone', () => {
     const h = answerWheelHarness();
@@ -317,7 +304,7 @@ test('answer paper follows PDF orientation and centers the selected image', () =
             SIDE_MARGIN: 48, TOP_MARGIN: 36, BOTTOM_MARGIN: 48,
             MIN_IMAGE_WIDTH: 600, MAX_IMAGE_WIDTH: 1400, MAX_IMAGE_HEIGHT: 900,
             MIN_WRITING_HEIGHT: 420, PAPER_ASPECT_RATIO: 297 / 210,
-            historyRef: { current: [] }, textAnnotationsRef: { current: [] },
+            historyRef: { current: new CanvasUndoHistory() }, textAnnotationsRef: { current: [] },
             strokesRef: { current: [] }, activeStrokeRef: { current: null },
             editingTextRef: { current: null },
             setTextAnnotations() {}, setEditingText() {}, setCanUndo() {}, onCanUndoChange() {},
@@ -351,7 +338,7 @@ test('rebuilds pen strokes and text on the answer sheet', () => {
         SIDE_MARGIN: 48, TOP_MARGIN: 36, BOTTOM_MARGIN: 48,
         MIN_IMAGE_WIDTH: 600, MAX_IMAGE_WIDTH: 1400, MAX_IMAGE_HEIGHT: 900,
         MIN_WRITING_HEIGHT: 420, PAPER_ASPECT_RATIO: 297 / 210,
-        historyRef: { current: [] }, strokesRef, activeStrokeRef: { current: null },
+        historyRef: { current: new CanvasUndoHistory() }, strokesRef, activeStrokeRef: { current: null },
         textAnnotationsRef, editingTextRef: { current: null },
         setTextAnnotations() {}, setEditingText() {}, setCanUndo() {}, onCanUndoChange() {},
         console: { log() {} },
@@ -385,7 +372,7 @@ test('reopened answers retain their recorded paper and image placement', () => {
         SIDE_MARGIN: 48, TOP_MARGIN: 36, BOTTOM_MARGIN: 48,
         MIN_IMAGE_WIDTH: 600, MAX_IMAGE_WIDTH: 1400, MAX_IMAGE_HEIGHT: 900,
         MIN_WRITING_HEIGHT: 420, PAPER_ASPECT_RATIO: 297 / 210,
-        historyRef: { current: [] }, strokesRef: { current: [] }, activeStrokeRef: { current: null },
+        historyRef: { current: new CanvasUndoHistory() }, strokesRef: { current: [] }, activeStrokeRef: { current: null },
         textAnnotationsRef: { current: [] }, editingTextRef: { current: null },
         setTextAnnotations() {}, setEditingText() {}, setCanUndo() {}, onCanUndoChange() {},
         console: { log() {} },
@@ -407,7 +394,7 @@ test('older answers use their paper size to recover the cutout scale', () => {
         SIDE_MARGIN: 48, TOP_MARGIN: 36, BOTTOM_MARGIN: 48,
         MIN_IMAGE_WIDTH: 600, MAX_IMAGE_WIDTH: 1400, MAX_IMAGE_HEIGHT: 900,
         MIN_WRITING_HEIGHT: 420, PAPER_ASPECT_RATIO: 297 / 210,
-        historyRef: { current: [] }, strokesRef: { current: [] }, activeStrokeRef: { current: null },
+        historyRef: { current: new CanvasUndoHistory() }, strokesRef: { current: [] }, activeStrokeRef: { current: null },
         textAnnotationsRef: { current: [] }, editingTextRef: { current: null },
         setTextAnnotations() {}, setEditingText() {}, setCanUndo() {}, onCanUndoChange() {},
         console: { log() {} },

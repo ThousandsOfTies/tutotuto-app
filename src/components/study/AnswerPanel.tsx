@@ -1,7 +1,9 @@
+import { useAnswerWheel } from '@home-teacher/common/hooks/useAnswerWheel'
+import { pinchViewport, touchPair } from '@thousands-of-ties/drawing-common'
 import { useRef, useState, useEffect, forwardRef, useImperativeHandle } from 'react'
 import { ICON_SVG } from '../../constants/icons'
 import type { PDFStudyAnswerState } from '@home-teacher/common/utils/indexedDB'
-import { doPathsIntersect, isScratchPattern, type DrawingPath } from '@thousands-of-ties/drawing-common'
+import { CanvasUndoHistory, doPathsIntersect, isScratchPattern, type DrawingPath } from '@thousands-of-ties/drawing-common'
 import VoiceTextEditor from './VoiceTextEditor'
 import './AnswerPanel.css'
 
@@ -56,7 +58,6 @@ const redrawAnswerStrokes = (canvas: HTMLCanvasElement, strokes: AnswerStroke[])
 }
 
 interface AnswerSnapshot {
-  drawing: ImageData
   strokes: AnswerStroke[]
   texts: AnswerText[]
 }
@@ -109,7 +110,7 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
   const drawCanvasRef = useRef<HTMLCanvasElement>(null)
   const isDrawingRef = useRef(false)
   const lastPosRef = useRef<{ x: number; y: number } | null>(null)
-  const historyRef = useRef<AnswerSnapshot[]>([])
+  const historyRef = useRef(new CanvasUndoHistory<AnswerSnapshot>())
   const strokesRef = useRef<AnswerStroke[]>([])
   const activeStrokeRef = useRef<AnswerStroke | null>(null)
   const questionLayoutRef = useRef<PDFStudyAnswerState['questionLayout']>(undefined)
@@ -123,8 +124,7 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
   // Zoom & Pan state
   const [zoom, setZoom] = useState(1.0)
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 })
-  const viewportRef = useRef({ zoom, panOffset })
-  viewportRef.current = { zoom, panOffset }
+
   const [isPanning, setIsPanning] = useState(false)
   const [isCtrlPressed, setIsCtrlPressed] = useState(false)
   const panStartRef = useRef<{ x: number; y: number } | null>(null)
@@ -211,12 +211,11 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
     // Question image
     ctx.drawImage(img, imageLeft, imageTop, imgW, imgH)
 
-
     // Clear draw canvas (fully transparent)
     const dCtx = drawCanvas.getContext('2d')!
     dCtx.clearRect(0, 0, w, h)
 
-    historyRef.current = []
+    historyRef.current.clear()
     strokesRef.current = []
     activeStrokeRef.current = null
     let restoredTexts: AnswerText[] = []
@@ -323,12 +322,10 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
   const saveSnapshot = () => {
     const drawCanvas = drawCanvasRef.current
     if (!drawCanvas) return
-    const ctx = drawCanvas.getContext('2d')!
-    historyRef.current.push({
-      drawing: ctx.getImageData(0, 0, drawCanvas.width, drawCanvas.height),
+    if (!historyRef.current.push(drawCanvas, {
       strokes: [...strokesRef.current],
       texts: [...textAnnotationsRef.current],
-    })
+    })) return
     setCanUndo(true)
     onCanUndoChange?.(true)
   }
@@ -336,10 +333,8 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
   const handleUndo = () => {
     const drawCanvas = drawCanvasRef.current
     if (!drawCanvas) return
-    const snapshot = historyRef.current.pop()
+    const snapshot = historyRef.current.undo(drawCanvas)?.state
     if (!snapshot) return
-    const ctx = drawCanvas.getContext('2d')!
-    ctx.putImageData(snapshot.drawing, 0, 0)
     strokesRef.current = snapshot.strokes
     activeStrokeRef.current = null
     updateTextAnnotations(snapshot.texts)
@@ -526,54 +521,7 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
   const editingDirection = editedAnnotation?.direction ?? textDirection
 
   // Zoom/Pan Helpers
-  useEffect(() => {
-    const container = containerRef.current
-    if (!container) return
-
-    const handleWheelNative = (e: WheelEvent) => {
-      if (e.defaultPrevented || e.buttons !== 0) return
-      if (e.target instanceof Element && e.target.closest(
-        '.voice-text-editor, input, textarea, select, button, [contenteditable="true"], [role="dialog"]'
-      )) return
-      const deltaY = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? container.clientHeight : 1)
-      if (!Number.isFinite(deltaY) || deltaY === 0) return
-      e.preventDefault()
-      e.stopPropagation()
-      // Successive native wheel events can arrive before React renders the last one.
-      const { zoom, panOffset } = viewportRef.current
-      if (e.ctrlKey || e.metaKey) {
-
-        const delta = -deltaY
-        const scaleFactor = 1.1
-        const newZoom = delta > 0 ? zoom * scaleFactor : zoom / scaleFactor
-        const clampedZoom = Math.min(Math.max(newZoom, 0.2), 5.0)
-
-        // Zoom toward mouse pointer
-        const rect = container.getBoundingClientRect()
-        const mouseX = e.clientX - rect.left
-        const mouseY = e.clientY - rect.top
-
-        const contentX = (mouseX - panOffset.x) / zoom
-        const contentY = (mouseY - panOffset.y) / zoom
-
-        const nextPan = {
-          x: mouseX - contentX * clampedZoom,
-          y: mouseY - contentY * clampedZoom
-        }
-        viewportRef.current = { zoom: clampedZoom, panOffset: nextPan }
-        setPanOffset(nextPan)
-        setZoom(clampedZoom)
-      } else {
-        // Normal scroll translates to pan
-        const nextPan = { ...panOffset, y: panOffset.y - deltaY }
-        viewportRef.current = { zoom, panOffset: nextPan }
-        setPanOffset(nextPan)
-      }
-    }
-
-    container.addEventListener('wheel', handleWheelNative, { passive: false })
-    return () => container.removeEventListener('wheel', handleWheelNative)
-  }, [zoom, panOffset])
+  useAnswerWheel(containerRef, { zoom, panOffset, setZoom, setPanOffset })
 
   const startPanning = (clientX: number, clientY: number) => {
     setIsPanning(true)
@@ -640,10 +588,8 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
             if (e.touches.length === 2) {
               stopDraw()
               textTouchStartRef.current = null
-              const t1 = e.touches[0]; const t2 = e.touches[1]
-              const dist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY)
-              const center = { x: (t1.clientX + t2.clientX) / 2, y: (t1.clientY + t2.clientY) / 2 }
-              gestureRef.current = { startZoom: zoom, startPan: panOffset, startDist: dist, startCenter: center }
+              const pair = touchPair(e.touches)
+              gestureRef.current = { startZoom: zoom, startPan: panOffset, startDist: pair.distance, startCenter: pair.center }
             } else if (e.touches.length === 1) {
               const t = e.touches[0]
               if (isTextMode) {
@@ -656,17 +602,10 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
           }}
           onTouchMove={(e) => {
             if (e.touches.length === 2 && gestureRef.current) {
-              const t1 = e.touches[0]; const t2 = e.touches[1]
-              const dist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY)
-              const center = { x: (t1.clientX + t2.clientX) / 2, y: (t1.clientY + t2.clientY) / 2 }
-              const { startZoom, startPan, startDist, startCenter } = gestureRef.current
-              const scale = dist / startDist
-              const newZoom = Math.min(Math.max(startZoom * scale, 0.2), 5.0)
-              const rect = containerRef.current!.getBoundingClientRect()
-              const contentX = (startCenter.x - rect.left - startPan.x) / startZoom
-              const contentY = (startCenter.y - rect.top - startPan.y) / startZoom
-              setZoom(newZoom)
-              setPanOffset({ x: center.x - rect.left - contentX * newZoom, y: center.y - rect.top - contentY * newZoom })
+              const bounds = containerRef.current?.getBoundingClientRect()
+              if (!bounds) return
+              const view = pinchViewport(gestureRef.current, touchPair(e.touches), bounds, 0.2)
+              if (view) { setZoom(view.zoom); setPanOffset(view.panOffset) }
             } else if (e.touches.length === 1) {
               const t = e.touches[0]
               if (isTextMode && textTouchStartRef.current) {
