@@ -17,6 +17,7 @@ import VoiceTextEditor from './VoiceTextEditor'
 import { getAllSNSLinks, SNSLinkRecord, PDFFileRecord, saveGradingHistory, generateGradingHistoryId, saveGradingImage, PDFStudyAnswerState, PDFStudyRegion, PDFStudyMarkerRecord, PDFStudyFollowUp, savePDFStudyMarker, getPDFStudyMarker, getPDFStudyMarkersByPdfId, appendPDFStudyFollowUp, getPDFStudyAsset } from '@home-teacher/common/utils/indexedDB'
 import { DrawingPath } from '@thousands-of-ties/drawing-common'
 import { PDFPane, PDFPaneHandle } from '@home-teacher/common/components/study/PDFPane'
+import { StudyPDFThumbnail } from '@home-teacher/common/components/study/StudyPDFThumbnail'
 import { StudyToolbar } from './StudyToolbar'
 
 import { useWheelPanelNavigation } from '@home-teacher/common/hooks/useWheelPanelNavigation'
@@ -1670,6 +1671,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
           onBack={onBack}
           breadcrumbs={visibleBreadcrumbPanels.map((panel, i) => ({
             label: getPanelLabel(panel),
+            content: panel.type === 'pdf' ? <StudyPDFThumbnail record={pdfRecord} /> : undefined,
             onClick: () => navigateToPanel(i),
             isCurrent: i === activePanelIndex
           }))}
