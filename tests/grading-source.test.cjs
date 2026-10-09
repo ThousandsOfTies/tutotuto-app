@@ -1,4 +1,4 @@
-const { answerWheelHarness, CanvasUndoHistory } = require('../../home-teacher-common/tests/helpers/answerCanvasHarness.cjs');
+const { answerWheelHarness, CanvasUndoHistory, drawStationaryStroke } = require('../../home-teacher-common/tests/helpers/answerCanvasHarness.cjs');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -28,11 +28,12 @@ function handler(name, adapters, componentAst = ast) {
     return vm.runInNewContext(code + '\nrun', {
         appMessages: require('../src/i18n/locales/ja.json'),
         traceUndo: { busy: false }, deletedStudyNodeIdsRef: { current: new Set() }, handledTracePointerRef: { current: false },
+        drawStationaryStroke,
         ...adapters,
     });
 }
 const toDrawingPath = handler('toDrawingPath', {}, answerAst);
-const redrawAnswerStrokes = handler('redrawAnswerStrokes', {}, answerAst);
+const redrawAnswerStrokes = handler('redrawAnswerStrokes', { toDrawingPath }, answerAst);
 const doSegmentsIntersect = handler('doSegmentsIntersect', {}, drawingAst);
 const doPathsIntersect = handler('doPathsIntersect', { doSegmentsIntersect }, drawingAst);
 const isScratchPattern = handler('isScratchPattern', {}, drawingAst);
@@ -443,6 +444,31 @@ test('finishing a pen or eraser stroke publishes its coordinates', () => {
     assert.deepEqual(Array.from(saved[0][0].points, point => Array.from(point)), [[10, 20], [30, 40]]);
     assert.equal(saved[1][1].eraser, true);
     assert.equal(saved[1][1].width, 20);
+});
+
+test('a stationary answer tap is painted, saved and repainted when the answer is reopened', () => {
+    const dots = [];
+    let circle;
+    const context = { beginPath() {}, moveTo() {}, lineTo() {}, stroke() {}, clearRect() {},
+        save() {}, restore() {}, arc(x, y, radius) { circle = { x, y, radius }; },
+        fill() { dots.push(circle); },
+    };
+    const canvas = { width: 800, height: 1200, getBoundingClientRect: () => ({ width: 800 }), getContext: () => context };
+    const strokesRef = { current: [] }, activeStrokeRef = { current: null };
+    const adapters = { drawCanvasRef: { current: canvas }, strokesRef, activeStrokeRef,
+        isDrawingRef: { current: false }, lastPosRef: { current: null },
+        saveSnapshot() {}, getPos: (x, y) => ({ x, y }), isEraserMode: false,
+        penSize: 6, eraserSize: 20, penColor: '#123456', publishAnswerState() {},
+        toDrawingPath, isScratchPattern, doPathsIntersect, redrawAnswerStrokes,
+    };
+    handler('startDraw', adapters, answerAst)(10, 20);
+    handler('drawTo', adapters, answerAst)(10, 20);
+    handler('stopDraw', adapters, answerAst)();
+    assert.equal(strokesRef.current.length, 1);
+    assert.equal(dots.length, 1);
+    assert.deepEqual(Array.from(strokesRef.current[0].points, point => Array.from(point)), [[10, 20], [10, 20]]);
+    redrawAnswerStrokes(canvas, strokesRef.current);
+    assert.deepEqual(dots, [{ x: 10, y: 20, radius: 3 }, { x: 10, y: 20, radius: 3 }]);
 });
 
 test('pen scratch removes crossed answer strokes and persists the remaining drawing', () => {
