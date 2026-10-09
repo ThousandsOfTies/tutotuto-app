@@ -545,6 +545,7 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
   }
 
   const strokeInput = useStrokeInput({
+    eventTargetRef: drawCanvasRef,
     enabled: !isTextMode && !isCtrlPressed,
     onStart: point => startDraw(point.clientX, point.clientY),
     onMove: points => {
