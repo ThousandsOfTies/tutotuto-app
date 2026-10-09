@@ -126,6 +126,7 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 })
 
   const [isPanning, setIsPanning] = useState(false)
+  const [isPinching, setIsPinching] = useState(false)
   const [isCtrlPressed, setIsCtrlPressed] = useState(false)
   const panStartRef = useRef<{ x: number; y: number } | null>(null)
   const gestureRef = useRef<{ startZoom: number; startPan: { x: number; y: number }; startDist: number; startCenter: { x: number; y: number } } | null>(null)
@@ -552,7 +553,7 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
         style={{
           transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoom})`,
           transformOrigin: '0 0',
-          transition: isPanning ? 'none' : 'transform 0.1s ease-out'
+          transition: isPanning || isPinching ? 'none' : 'transform 0.1s ease-out'
         }}
       >
         {/* Background layer: question image + writing area */}
@@ -586,6 +587,7 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
           onMouseLeave={() => { stopDraw(); stopPanning(); setEraserCursorPos(null) }}
           onTouchStart={(e) => {
             if (e.touches.length === 2) {
+              setIsPinching(true)
               stopDraw()
               textTouchStartRef.current = null
               const pair = touchPair(e.touches)
@@ -619,9 +621,15 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
             }
           }}
           onTouchEnd={(e) => {
+            if (e.touches.length < 2) setIsPinching(false)
             if (isTextMode && e.touches.length === 0 && textTouchStartRef.current && !textTouchStartRef.current.moved) {
               beginText(textTouchStartRef.current.x, textTouchStartRef.current.y)
             }
+            textTouchStartRef.current = null
+            stopDraw(); stopPanning(); setEraserCursorPos(null); gestureRef.current = null
+          }}
+          onTouchCancel={() => {
+            setIsPinching(false)
             textTouchStartRef.current = null
             stopDraw(); stopPanning(); setEraserCursorPos(null); gestureRef.current = null
           }}
