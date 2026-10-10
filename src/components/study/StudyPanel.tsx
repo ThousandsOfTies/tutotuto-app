@@ -1,3 +1,6 @@
+import { useRectangleSelection } from '@home-teacher/common/hooks/useRectangleSelection'
+import { captureStudyPDFSelection } from '@home-teacher/common/utils/studySelection'
+import { useStudyToolMode, studyToolForPanel } from '@home-teacher/common/hooks/useStudyToolMode'
 import { useStudyPDFPages } from '@home-teacher/common/hooks/useStudyPDFPages'
 import { useStudySplitResize } from '@home-teacher/common/hooks/useStudySplitResize'
 import { useStudyTextAnnotations, useStudyDrawingState } from '@home-teacher/common/hooks/useStudyPageAnnotations'
@@ -106,11 +109,9 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
     restore: restorePDFStudyMarkerDeletion,
   })
   const gradingPanelRef = useRef<HTMLDivElement>(null)
-  const isGradingCapturingRef = useRef(false)
-  const gradingCaptureStartRef = useRef<{ x: number; y: number } | null>(null)
-  const gradingCaptureRectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null)
-  const [gradingCaptureRect, setGradingCaptureRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
-  const [isGradingCaptureMode, setIsGradingCaptureMode] = useState(false)
+  const gradingSelection = useRectangleSelection(gradingPanelRef)
+  const { rect: gradingCaptureRect, activeRef: isGradingCapturingRef } = gradingSelection
+  const { setTool, isDrawingMode, isEraserMode, isTextMode, isSelectionMode, isGradingCaptureMode } = useStudyToolMode('select-pdf')
 
   // Layout State
   const [isSplitView, setIsSplitView] = useState(false)
@@ -148,16 +149,11 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
   }, [])
 
   // Selection State
-  const [isSelectionMode, setIsSelectionMode] = useState(true)
-  const [selectionRect, setSelectionRect] = useState<{ x: number, y: number, width: number, height: number } | null>(null)
-  const isSelectingRef = useRef(false)
-  const selectionStartRef = useRef<{ x: number, y: number } | null>(null)
+  const selection = useRectangleSelection(containerRef)
+  const { rect: selectionRect, activeRef: isSelectingRef } = selection
   const [isGrading, setIsGrading] = useState(false)
 
   // Tool State
-  const [isDrawingMode, setIsDrawingMode] = useState(false)
-  const [isEraserMode, setIsEraserMode] = useState(false)
-  const [isTextMode, setIsTextMode] = useState(false)
   const [penColor, setPenColor] = useState('#FF0000') // Updated to match bottom block default
   const [penSize, setPenSize] = useState(3)
   const [eraserSize, setEraserSize] = useState(50)
@@ -390,9 +386,8 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       setPanelStack(panels)
       // Restore breadcrumbs up to the first branch, then show the answer sheet after the PDF.
       setActivePanelIndex(1)
-      setIsSelectionMode(false)
-      setIsGradingCaptureMode(false)
-      setSelectionRect(null)
+      setTool('pen')
+      selection.cancel()
     } catch (error) {
       console.error('学習範囲を開けませんでした:', error)
     }
@@ -440,8 +435,8 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
     if (!control) return
     event.preventDefault()
     handledTracePointerRef.current = true
-    isSelectingRef.current = false
-    isGradingCapturingRef.current = false
+    selection.cancel()
+    gradingSelection.cancel()
     if (control.action === 'undo') {
       if (!isGrading) void undoStudyTraceDeletion()
       return
@@ -466,34 +461,11 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
     if (handledTracePointerRef.current) return
     if (getStudyTraceAtPoint(e.clientX, e.clientY)) return
 
-    // Get relative position within the container
-    const rect = containerRef.current?.getBoundingClientRect()
-    if (!rect) return
-
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
-
-    isSelectingRef.current = true
-    selectionStartRef.current = { x, y }
-    setSelectionRect({ x, y, width: 0, height: 0 })
+    selection.beginAt(e.clientX, e.clientY)
   }
 
   const handleSelectionMove = (e: React.MouseEvent) => {
-    if (!isSelectingRef.current || !selectionStartRef.current || !containerRef.current) return
-
-    const rect = containerRef.current.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
-
-    const startX = selectionStartRef.current.x
-    const startY = selectionStartRef.current.y
-
-    setSelectionRect({
-      x: Math.min(startX, x),
-      y: Math.min(startY, y),
-      width: Math.abs(x - startX),
-      height: Math.abs(y - startY)
-    })
+    selection.moveAt(e.clientX, e.clientY)
   }
 
   /* 共通: オーバーレイでピンチズームを直接処理 */
@@ -520,32 +492,18 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
 
   const { handleOverlayTouchStart, handleOverlayTouchMove, handleOverlayTouchEnd, handleOverlayTouchCancel } = useStudyOverlayTouch({
     containerRef, getTargetPane, getPane: pane => getTargetPaneRef(pane).current,
-    cancelSelection: () => { isSelectingRef.current = false; selectionStartRef.current = null },
+    cancelSelection: selection.cancel,
   })
 
   /* Selection Mode Touch Handlers */
   const handleTouchSelectionStart = (e: React.TouchEvent) => {
     if (handledTracePointerRef.current) return
     if (e.touches.length === 1 && getStudyTraceAtPoint(e.touches[0].clientX, e.touches[0].clientY)) return
-    handleOverlayTouchStart(e, (x, y) => {
-      isSelectingRef.current = true
-      selectionStartRef.current = { x, y }
-      setSelectionRect({ x, y, width: 0, height: 0 })
-    })
+    handleOverlayTouchStart(e, selection.begin)
   }
 
   const handleTouchSelectionMove = (e: React.TouchEvent) => {
-    handleOverlayTouchMove(e, (x, y) => {
-      if (!isSelectingRef.current || !selectionStartRef.current) return
-      const startX = selectionStartRef.current.x
-      const startY = selectionStartRef.current.y
-      setSelectionRect({
-        x: Math.min(startX, x),
-        y: Math.min(startY, y),
-        width: Math.abs(x - startX),
-        height: Math.abs(y - startY)
-      })
-    })
+    handleOverlayTouchMove(e, selection.move)
   }
 
   const handleTouchSelectionEnd = async (e: React.TouchEvent) => {
@@ -556,19 +514,12 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
   }
 
   const handleSelectionEnd = async () => {
-    if (!isSelectingRef.current || !selectionRect) return
-
-    isSelectingRef.current = false
-
-    // Check if selection is large enough
-    if (selectionRect.width < 10 || selectionRect.height < 10) {
-      setSelectionRect(null)
-      return
-    }
+    const captureRect = selection.finish()
+    if (!captureRect) return
 
     // Capture Image Logic (Stitching)
     try {
-      const capturedImage = await captureSelectionArea(selectionRect)
+      const capturedImage = await captureSelectionArea(captureRect)
       if (capturedImage) {
         const trace: PDFStudyMarkerRecord = {
           id: `trace_${crypto.randomUUID()}`,
@@ -581,14 +532,14 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
         await savePDFStudyMarker(trace)
         setStudyTraces(previous => [...previous, trace])
         pushPanel({ type: 'answer', questionImage: capturedImage.image, sourcePageNumbers: capturedImage.sourcePageNumbers, paperOrientation: capturedImage.paperOrientation, traceId: trace.id, nodeId: trace.id })
-        setIsSelectionMode(false)
-        setSelectionRect(null)
+        setTool('pen')
+        selection.cancel()
       } else {
-        setSelectionRect(null)
+        selection.cancel()
       }
     } catch (error) {
       console.error("Capture error:", error)
-      setSelectionRect(null)
+      selection.cancel()
     }
   }
 
@@ -604,55 +555,26 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
     const viewport = getResultViewportBounds(panel)
     if (!viewport || e.clientX < viewport.left || e.clientX >= viewport.right ||
       e.clientY < viewport.top || e.clientY >= viewport.bottom) return
-    const rect = panel.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
     e.preventDefault()
-    isGradingCapturingRef.current = true
-    gradingCaptureStartRef.current = { x, y }
-    gradingCaptureRectRef.current = { x, y, width: 0, height: 0 }
-    setGradingCaptureRect(gradingCaptureRectRef.current)
+    gradingSelection.beginAt(e.clientX, e.clientY)
   }
 
   const handleGradingCaptureMove = (e: React.MouseEvent) => {
-    if (!isGradingCapturingRef.current || !gradingCaptureStartRef.current || !gradingPanelRef.current) return
-    const rect = gradingPanelRef.current.getBoundingClientRect()
-    const viewport = getResultViewportBounds(gradingPanelRef.current)
-    if (!viewport) return
-    const x = Math.max(viewport.left, Math.min(viewport.right, e.clientX)) - rect.left
-    const y = Math.max(viewport.top, Math.min(viewport.bottom, e.clientY)) - rect.top
-    const sx = gradingCaptureStartRef.current.x
-    const sy = gradingCaptureStartRef.current.y
-    gradingCaptureRectRef.current = {
-      x: Math.min(sx, x),
-      y: Math.min(sy, y),
-      width: Math.abs(x - sx),
-      height: Math.abs(y - sy)
-    }
-    setGradingCaptureRect(gradingCaptureRectRef.current)
+    const panel = gradingPanelRef.current
+    const viewport = panel && getResultViewportBounds(panel)
+    if (viewport) gradingSelection.moveAt(e.clientX, e.clientY, viewport)
   }
 
   const handleGradingCaptureScroll = () => {
-    if (!isGradingCapturingRef.current) return
-    // Scrolling changes the answer's coordinates; discard only the unfinished selection.
-    isGradingCapturingRef.current = false
-    gradingCaptureStartRef.current = null
-    gradingCaptureRectRef.current = null
-    setGradingCaptureRect(null)
+    if (isGradingCapturingRef.current) gradingSelection.cancel()
   }
 
   const handleGradingCaptureEnd = async () => {
     const sourcePanel = panelStack[activePanelIndex]
     if (sourcePanel?.type !== 'grading') return
-    const captureRect = gradingCaptureRectRef.current
-    if (!isGradingCapturingRef.current || !captureRect || !gradingPanelRef.current) return
-    isGradingCapturingRef.current = false
-
-    if (captureRect.width < 10 || captureRect.height < 10) {
-      gradingCaptureRectRef.current = null
-      setGradingCaptureRect(null)
-      return
-    }
+    if (!gradingPanelRef.current) return
+    const captureRect = gradingSelection.finish()
+    if (!captureRect) return
 
     try {
       const html2canvas = (await import('html2canvas')).default
@@ -722,112 +644,34 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
         paperOrientation: sourcePanel.paperOrientation ?? await getPDFPageOrientation(sourcePanel.sourcePageNumbers[0]),
         source: 'grading', traceId: sourcePanel.traceId, nodeId,
       })
-      setIsGradingCaptureMode(false)
-      gradingCaptureRectRef.current = null
-      setGradingCaptureRect(null)
+      setTool('pen')
+      gradingSelection.cancel()
     } catch (error) {
       console.error('Grading capture error:', error)
-      gradingCaptureRectRef.current = null
-      setGradingCaptureRect(null)
+      gradingSelection.cancel()
     }
   }
 
   const cancelGradingCapture = () => {
-    setIsGradingCaptureMode(false)
-    gradingCaptureRectRef.current = null
-    setGradingCaptureRect(null)
-    isGradingCapturingRef.current = false
+    setTool(previous => previous === 'select-result' ? 'none' : previous)
+    gradingSelection.cancel()
   }
 
-  const activateGradingCapture = useCallback(() => {
-    setIsSelectionMode(false)
-    setIsDrawingMode(false)
-    setIsEraserMode(false)
-    setIsTextMode(false)
+  const activatePanelMode = useCallback((panelType: PanelData['type']) => {
+    setTool(studyToolForPanel(panelType, 'pen'))
+    selection.cancel()
     setIsHoveringStudyTrace(false)
-    gradingCaptureRectRef.current = null
-    setGradingCaptureRect(null)
-    isGradingCapturingRef.current = false
-    setIsGradingCaptureMode(true)
-  }, [])
+    gradingSelection.cancel()
+  }, [setTool, selection.cancel, gradingSelection.cancel])
 
   const captureSelectionArea = async (rect: { x: number, y: number, width: number, height: number }) => {
-    if (!containerRef.current) return null
-
-    // Create a temporary canvas to draw the result
-    const tempCanvas = document.createElement('canvas')
-    tempCanvas.width = rect.width
-    tempCanvas.height = rect.height
-    const ctx = tempCanvas.getContext('2d')
-    if (!ctx) return null
-    const sourcePageNumbers: number[] = []
-    const regions: PDFStudyRegion[] = []
-    const captureRegions: NonNullable<PDFStudyMarkerRecord['captureLayout']>['regions'] = []
-    let paperOrientation: PaperOrientation | undefined
-
-    // ペインからキャプチャするヘルパー
-    const captureFromPane = (paneRef: React.RefObject<PDFPaneHandle>, paneClassName: string, pageNumber: number) => {
-      const paneEl = containerRef.current?.querySelector(`.${paneClassName}`)
-      const compositeCanvas = paneRef.current?.getCanvas()
-      const visibleCanvas = paneEl?.querySelector('.pdf-canvas') as HTMLCanvasElement | null
-
-      if (!paneEl || !compositeCanvas || !visibleCanvas) return
-
-      const paneRect = paneEl.getBoundingClientRect()
-      const containerRect = containerRef.current!.getBoundingClientRect()
-      const canvasRect = visibleCanvas.getBoundingClientRect()
-
-      const selectionScreenX = containerRect.left + rect.x
-      const selectionScreenY = containerRect.top + rect.y
-      const selectionScreenW = rect.width
-      const selectionScreenH = rect.height
-
-      // Only include pixels visible inside this pane, including when zoomed.
-      const intersectX = Math.max(selectionScreenX, canvasRect.left, paneRect.left)
-      const intersectY = Math.max(selectionScreenY, canvasRect.top, paneRect.top)
-      const intersectW = Math.min(selectionScreenX + selectionScreenW, canvasRect.right, paneRect.right) - intersectX
-      const intersectH = Math.min(selectionScreenY + selectionScreenH, canvasRect.bottom, paneRect.bottom) - intersectY
-
-      if (intersectW <= 0 || intersectH <= 0) return
-
-      // The crop may be narrow even on a landscape PDF. Use the rendered page, not the crop, for paper orientation.
-      paperOrientation ??= canvasRect.width > canvasRect.height ? 'landscape' : 'portrait'
-
-      const scaleX = compositeCanvas.width / canvasRect.width
-      const scaleY = compositeCanvas.height / canvasRect.height
-
-      const sx = (intersectX - canvasRect.left) * scaleX
-      const sy = (intersectY - canvasRect.top) * scaleY
-      const sw = intersectW * scaleX
-      const sh = intersectH * scaleY
-
-      const dx = intersectX - selectionScreenX
-      const dy = intersectY - selectionScreenY
-
-      ctx.drawImage(compositeCanvas, sx, sy, sw, sh, dx, dy, intersectW, intersectH)
-      if (!sourcePageNumbers.includes(pageNumber)) sourcePageNumbers.push(pageNumber)
-      regions.push({
-        pageNumber,
-        x: (intersectX - canvasRect.left) / canvasRect.width,
-        y: (intersectY - canvasRect.top) / canvasRect.height,
-        width: intersectW / canvasRect.width,
-        height: intersectH / canvasRect.height,
-      })
-      captureRegions.push({ x: dx, y: dy, width: intersectW, height: intersectH })
-    }
-
-    if (activeTab === 'A' || isSplitView) {
-      captureFromPane(paneARef, 'pane-a', pageA)
-    }
-
-    if (activeTab === 'B' || isSplitView) {
-      captureFromPane(paneBRef, 'pane-b', pageB)
-    }
-
-    return sourcePageNumbers.length ? {
-      image: tempCanvas.toDataURL('image/png'), sourcePageNumbers, regions, paperOrientation,
-      captureLayout: { width: tempCanvas.width, height: tempCanvas.height, regions: captureRegions },
-    } : null
+    const container = containerRef.current
+    return captureStudyPDFSelection(container, rect, [
+      ...(activeTab === 'A' || isSplitView ? [{ element: container?.querySelector('.pane-a') ?? null,
+        canvas: paneARef.current?.getCanvas(), pageNumber: pageA }] : []),
+      ...(activeTab === 'B' || isSplitView ? [{ element: container?.querySelector('.pane-b') ?? null,
+        canvas: paneBRef.current?.getCanvas(), pageNumber: pageB }] : []),
+    ])
   }
 
   // パス追加ハンドラ
@@ -929,15 +773,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
 
       setGradingError(null)
 
-      // Flatten problems if they have nested numeric keys (fallback for non-normalized server response)
-      let problems = response.result.problems
-      if (problems.length === 1 && Object.keys(problems[0]).some(k => /^\d+$/.test(k))) {
-        const nested = problems[0]
-        const numericKeys = Object.keys(nested).filter(k => /^\d+$/.test(k))
-        problems = numericKeys.map(k => nested[k])
-      }
-
-      const gradingResult = { ...response.result, problems }
+      const gradingResult = response.result
       if (traceId) {
         try {
           await pendingAnswerWritesRef.current.get(traceId)
@@ -1017,11 +853,8 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
   const toggleDrawingMode = () => {
     if (!isDrawingMode) {
       cancelGradingCapture()
-      setIsDrawingMode(true)
-      setIsEraserMode(false)
-      setIsTextMode(false)
-      setIsSelectionMode(false)
-      setSelectionRect(null)
+      setTool('pen')
+      selection.cancel()
     }
   }
 
@@ -1029,11 +862,8 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
   const toggleEraserMode = () => {
     if (!isEraserMode) {
       cancelGradingCapture()
-      setIsEraserMode(true)
-      setIsDrawingMode(false)
-      setIsTextMode(false)
-      setIsSelectionMode(false)
-      setSelectionRect(null)
+      setTool('eraser')
+      selection.cancel()
     }
   }
 
@@ -1042,7 +872,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
     const currentPanel = panelStack[activePanelIndex]
     if (currentPanel?.type === 'grading') {
       // 採点結果パネル上での範囲選択（html2canvasでキャプチャ）
-      activateGradingCapture()
+      activatePanelMode('grading')
       return
     }
     // PDFパネルが表示されていない場合は先にPDFパネルへ移動
@@ -1050,21 +880,15 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
     if (pdfIndex >= 0 && activePanelIndex !== pdfIndex) {
       setActivePanelIndex(pdfIndex)
     }
-    setIsSelectionMode(true)
-    setIsDrawingMode(false)
-    setIsEraserMode(false)
-    setIsTextMode(false)
-    setSelectionRect(null)
+    setTool('select-pdf')
+    selection.cancel()
   }
 
   // テキストモードのトグル
   const toggleTextMode = () => {
     if (!isTextMode) {
       cancelGradingCapture()
-      setIsTextMode(true)
-      setIsDrawingMode(false)
-      setIsEraserMode(false)
-      setIsSelectionMode(false)
+      setTool('text')
     }
   }
 
@@ -1183,7 +1007,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
 
   // 矩形選択モードをキャンセル
   const handleCancelSelection = () => {
-    setSelectionRect(null)
+    selection.cancel()
   }
 
   // Ctrl+Z Undo - アクティブなページの最後の描画を削除
@@ -1203,12 +1027,12 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
   }
 
   const activePanel = panelStack[activePanelIndex]
+  const activePanelIdentity = activePanel?.type === 'pdf' ? 'pdf' : `${activePanel?.traceId}:${activePanel?.nodeId}`
   useEffect(() => {
-    if (activePanel?.type === 'grading') activateGradingCapture()
-  }, [activePanel, activateGradingCapture])
+    if (activePanel) activatePanelMode(activePanel.type)
+  }, [activePanelIndex, activePanel?.type, activePanelIdentity, activatePanelMode])
 
   const isOnAnswerPanel = activePanel?.type === 'answer'
-  const isPenActive = isOnAnswerPanel ? !isEraserMode && !isTextMode : isDrawingMode
   const activeGradingHasBranches = activePanel?.type === 'grading' &&
     (studyTraces.find(item => item.id === activePanel.traceId)?.followUps ?? [])
       .filter(item => item.parentId === (activePanel.nodeId ?? activePanel.traceId)).length > 1
@@ -1254,18 +1078,9 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
   }
 
   const navigateToPanel = (index: number) => {
-    if (panelStack[index]?.type === 'pdf') {
-      setIsSelectionMode(true)
-      setSelectionRect(null)
-    } else {
-      setIsSelectionMode(false)
-    }
-    setIsDrawingMode(false)
-    setIsEraserMode(false)
-    setIsTextMode(false)
-    setIsHoveringStudyTrace(false)
-    cancelGradingCapture()
-    if (panelStack[index]?.type === 'grading') activateGradingCapture()
+    const panel = panelStack[index]
+    if (!panel) return
+    activatePanelMode(panel.type)
     setActivePanelIndex(index)
   }
 
@@ -1699,7 +1514,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
           setTextFontSize={setTextFontSize}
           textDirection={textDirection}
           setTextDirection={setTextDirection}
-          isDrawingMode={isPenActive}
+          isDrawingMode={isDrawingMode}
           toggleDrawingMode={toggleDrawingMode}
           penColor={penColor}
           setPenColor={setPenColor}

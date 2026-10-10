@@ -130,6 +130,7 @@ function App() {
     <div className="app">
       {currentView === 'admin' ? (
         <AdminPanel
+          billingVariant="tutotuto"
           key={`admin-${settingsVersion}`}
           onSelectPDF={handleSelectPDF}
           onEditPDF={handleEditPDF}

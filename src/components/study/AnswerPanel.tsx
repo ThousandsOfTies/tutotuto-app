@@ -1,5 +1,5 @@
-import { useAnswerWheel } from '@home-teacher/common/hooks/useAnswerWheel'
-import { pinchViewport, touchPair, useStrokeInput, drawStationaryStroke, resizeCanvasForDisplay, getCanvasLogicalSize } from '@thousands-of-ties/drawing-common'
+import { useAnswerViewport } from '@home-teacher/common/hooks/useAnswerViewport'
+import { viewportCursorPosition, touchPair, useStrokeInput, drawStationaryStroke, resizeCanvasForDisplay, getCanvasLogicalSize } from '@thousands-of-ties/drawing-common'
 import { useRef, useState, useEffect, forwardRef, useImperativeHandle } from 'react'
 import { ICON_SVG } from '../../constants/icons'
 import type { PDFStudyAnswerState } from '@home-teacher/common/utils/indexedDB'
@@ -124,16 +124,13 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
   const [eraserCursorPos, setEraserCursorPos] = useState<{ x: number; y: number; diameter: number } | null>(null)
 
   // Zoom & Pan state
-  const [zoom, setZoom] = useState(1.0)
-  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 })
+  const containerRef = useRef<HTMLDivElement>(null)
+  const { zoom, panOffset, restoreViewport, isPanning, isCtrlPressed, getViewport, applyPinch,
+    startPanning, doPanning, stopPanning } = useAnswerViewport(containerRef)
 
-  const [isPanning, setIsPanning] = useState(false)
   const [isPinching, setIsPinching] = useState(false)
-  const [isCtrlPressed, setIsCtrlPressed] = useState(false)
-  const panStartRef = useRef<{ x: number; y: number } | null>(null)
   const gestureRef = useRef<{ startZoom: number; startPan: { x: number; y: number }; startDist: number; startCenter: { x: number; y: number } } | null>(null)
   const textTouchStartRef = useRef<{ x: number; y: number; moved: boolean } | null>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     onCanUndoChange?.(canUndo)
@@ -267,14 +264,13 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
       if (cancelled) return
       initCanvas(img)
       // Reset zoom/pan on new image
-      setZoom(1.0)
       const container = containerRef.current
       const style = container ? getComputedStyle(container) : null
       const imageWidth = bgCanvasRef.current ? getCanvasLogicalSize(bgCanvasRef.current).width : 0
       const availableWidth = container && style
         ? container.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
         : imageWidth
-      setPanOffset({ x: Math.min(0, (availableWidth - imageWidth) / 2), y: 0 })
+      restoreViewport({ zoom: 1, panOffset: { x: Math.min(0, (availableWidth - imageWidth) / 2), y: 0 } })
     }
     img.src = questionImage
     return () => {
@@ -283,17 +279,6 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
     }
   }, [questionImage, paperOrientation, initialAnswerState])
 
-  // Ctrl Key detection
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => { if (e.key === 'Control') setIsCtrlPressed(true) }
-    const handleKeyUp = (e: KeyboardEvent) => { if (e.key === 'Control') setIsCtrlPressed(false) }
-    window.addEventListener('keydown', handleKeyDown)
-    window.addEventListener('keyup', handleKeyUp)
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown)
-      window.removeEventListener('keyup', handleKeyUp)
-    }
-  }, [])
 
   const getAnswerState = (): PDFStudyAnswerState | null => {
     const canvas = drawCanvasRef.current
@@ -511,16 +496,8 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
     lastPosRef.current = null
   }
 
-  const getEraserCursorPos = (clientX: number, clientY: number) => {
-    const container = containerRef.current
-    if (!container) return null
-    const rect = container.getBoundingClientRect()
-    return {
-      x: clientX - rect.left - container.clientLeft + container.scrollLeft,
-      y: clientY - rect.top - container.clientTop + container.scrollTop,
-      diameter: eraserSize,
-    }
-  }
+  const getEraserCursorPos = (clientX: number, clientY: number) =>
+    viewportCursorPosition(containerRef.current, clientX, clientY, eraserSize)
 
   const cursor = isPanning ? 'grabbing' : (isCtrlPressed ? 'grab' : (isTextMode ? 'text' : (isEraserMode ? 'none' : ICON_SVG.penCursor(penColor))))
   const editedAnnotation = editingText?.id
@@ -528,26 +505,7 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
     : undefined
   const editingDirection = editedAnnotation?.direction ?? textDirection
 
-  // Zoom/Pan Helpers
-  useAnswerWheel(containerRef, { zoom, panOffset, setZoom, setPanOffset })
 
-  const startPanning = (clientX: number, clientY: number) => {
-    setIsPanning(true)
-    panStartRef.current = { x: clientX - panOffset.x, y: clientY - panOffset.y }
-  }
-
-  const doPanning = (clientX: number, clientY: number) => {
-    if (!isPanning || !panStartRef.current) return
-    setPanOffset({
-      x: clientX - panStartRef.current.x,
-      y: clientY - panStartRef.current.y
-    })
-  }
-
-  const stopPanning = () => {
-    setIsPanning(false)
-    panStartRef.current = null
-  }
 
   const strokeInput = useStrokeInput({
     eventTargetRef: drawCanvasRef,
@@ -615,7 +573,8 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
               strokeInput.cancel()
               textTouchStartRef.current = null
               const pair = touchPair(e.touches)
-              gestureRef.current = { startZoom: zoom, startPan: panOffset, startDist: pair.distance, startCenter: pair.center }
+              const current = getViewport()
+              gestureRef.current = { startZoom: current.zoom, startPan: current.panOffset, startDist: pair.distance, startCenter: pair.center }
             } else if (e.touches.length === 1) {
               const t = e.touches[0]
               if (isTextMode) {
@@ -627,10 +586,7 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
           onTouchMove={(e) => {
             if (strokeInput.onTouchMove(e)) return
             if (e.touches.length === 2 && gestureRef.current) {
-              const bounds = containerRef.current?.getBoundingClientRect()
-              if (!bounds) return
-              const view = pinchViewport(gestureRef.current, touchPair(e.touches), bounds, 0.2)
-              if (view) { setZoom(view.zoom); setPanOffset(view.panOffset) }
+              applyPinch(gestureRef.current, touchPair(e.touches))
             } else if (e.touches.length === 1) {
               const t = e.touches[0]
               if (isTextMode && textTouchStartRef.current) {

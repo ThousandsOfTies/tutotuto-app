@@ -1,3 +1,4 @@
+const { studySelectionAdapters } = require('../../home-teacher-common/tests/helpers/studySelectionHarness.cjs');
 const { answerWheelHarness, CanvasUndoHistory, drawStationaryStroke, resizeCanvasForDisplay, getCanvasLogicalSize } = require('../../home-teacher-common/tests/helpers/answerCanvasHarness.cjs');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -5,6 +6,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const ts = require('typescript');
+const toolModeExports = {};
+vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname,
+    '../../home-teacher-common/src/hooks/useStudyToolMode.ts'), 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText, { exports: toolModeExports, require });
+const { studyToolForPanel } = toolModeExports;
 
 // Run the real component handlers with deterministic canvas/API/storage adapters.
 const filename = path.join(__dirname, '../src/components/study/StudyPanel.tsx');
@@ -27,9 +34,10 @@ function handler(name, adapters, componentAst = ast) {
     }).outputText;
     return vm.runInNewContext(code + '\nrun', {
         appMessages: require('../src/i18n/locales/ja.json'),
+        setTool() {}, studyToolForPanel,
         traceUndo: { busy: false }, deletedStudyNodeIdsRef: { current: new Set() }, handledTracePointerRef: { current: false },
         drawStationaryStroke, resizeCanvasForDisplay, getCanvasLogicalSize,
-        ...adapters,
+        ...studySelectionAdapters(adapters), ...adapters,
     });
 }
 const toDrawingPath = handler('toDrawingPath', {}, answerAst);
@@ -762,28 +770,30 @@ test('an ungraded PDF mark opens its saved answer', async () => {
 
 test('returning to PDF activates range selection instead of leaving no tool active', () => {
     const modeChanges = [];
-    const run = handler('navigateToPanel', {
-        panelStack: [{ type: 'pdf' }, { type: 'answer' }],
-        setIsSelectionMode: value => modeChanges.push(['selection', value]),
-        setIsDrawingMode: value => modeChanges.push(['pen', value]),
-        setIsEraserMode: value => modeChanges.push(['eraser', value]),
-        setIsTextMode: value => modeChanges.push(['text', value]),
+    const activatePanelMode = handler('activatePanelMode', {
+        useCallback: callback => callback,
+        setTool: value => modeChanges.push(['tool', value]),
         setSelectionRect: value => modeChanges.push(['rect', value]),
         setIsHoveringStudyTrace: value => modeChanges.push(['hover', value]),
-        cancelGradingCapture: () => modeChanges.push(['grading', false]),
+        setGradingCaptureRect() {}, isSelectingRef: { current: true }, selectionStartRef: { current: {} },
+        gradingCaptureRectRef: { current: {} }, isGradingCapturingRef: { current: true },
+    });
+    const run = handler('navigateToPanel', {
+        panelStack: [{ type: 'pdf' }, { type: 'answer' }, { type: 'grading' }], activatePanelMode,
         setActivePanelIndex: value => modeChanges.push(['panel', value]),
     });
     run(0);
     assert.deepEqual(Object.fromEntries(modeChanges), {
-        selection: true, pen: false, eraser: false, text: false,
-        rect: null, hover: false, grading: false, panel: 0,
+        tool: 'select-pdf', rect: null, hover: false, panel: 0,
     });
     modeChanges.length = 0;
     run(1);
     assert.deepEqual(Object.fromEntries(modeChanges), {
-        selection: false, pen: false, eraser: false, text: false,
-        hover: false, grading: false, panel: 1,
+        tool: 'pen', rect: null, hover: false, panel: 1,
     });
+    modeChanges.length = 0;
+    run(2);
+    assert.equal(Object.fromEntries(modeChanges).tool, 'select-result');
 });
 
 test('PDF horizontal navigation uses visible-page marks and never chooses between multiple ranges', () => {
