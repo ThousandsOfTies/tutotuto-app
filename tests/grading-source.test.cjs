@@ -1,4 +1,4 @@
-const { answerWheelHarness, CanvasUndoHistory, drawStationaryStroke } = require('../../home-teacher-common/tests/helpers/answerCanvasHarness.cjs');
+const { answerWheelHarness, CanvasUndoHistory, drawStationaryStroke, resizeCanvasForDisplay, getCanvasLogicalSize } = require('../../home-teacher-common/tests/helpers/answerCanvasHarness.cjs');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -28,7 +28,7 @@ function handler(name, adapters, componentAst = ast) {
     return vm.runInNewContext(code + '\nrun', {
         appMessages: require('../src/i18n/locales/ja.json'),
         traceUndo: { busy: false }, deletedStudyNodeIdsRef: { current: new Set() }, handledTracePointerRef: { current: false },
-        drawStationaryStroke,
+        drawStationaryStroke, resizeCanvasForDisplay, getCanvasLogicalSize,
         ...adapters,
     });
 }
@@ -294,10 +294,10 @@ test('answer paper follows PDF orientation and centers the selected image', () =
         ['portrait', 700, 300],
     ]) {
         let imagePlacement;
-        const bgCanvas = { getContext: () => ({
+        const bgCanvas = { style: {}, getContext: () => ({ setTransform() {},
             fillRect() {}, drawImage: (...args) => { imagePlacement = args; },
         }) };
-        const drawCanvas = { getContext: () => ({ clearRect() {} }) };
+        const drawCanvas = { style: {}, getContext: () => ({ setTransform() {}, clearRect() {} }) };
         const run = handler('initCanvas', {
             bgCanvasRef: { current: bgCanvas }, drawCanvasRef: { current: drawCanvas },
             questionLayoutRef: { current: undefined },
@@ -325,8 +325,8 @@ test('rebuilds pen strokes and text on the answer sheet', () => {
         strokes: [{ points: [[100, 100], [150, 200]], width: 8, color: '#123456', eraser: false }],
         texts: [{ id: 'text', x: 200, y: 300, text: '解答', fontSize: 24, color: '#123456', direction: 'horizontal' }],
     };
-    const bgCanvas = { getContext: () => ({ fillRect() {}, drawImage() {} }) };
-    const drawCanvas = { getContext: () => ({
+    const bgCanvas = { style: {}, getContext: () => ({ setTransform() {}, fillRect() {}, drawImage() {} }) };
+    const drawCanvas = { style: {}, getContext: () => ({ setTransform() {},
         clearRect() {}, beginPath() {}, moveTo() {},
         lineTo: (...args) => drawn.push(args), stroke() {},
     }) };
@@ -361,8 +361,8 @@ test('reopened answers retain their recorded paper and image placement', () => {
         texts: [],
     };
     let imagePlacement, strokeEndpoint;
-    const bgCanvas = { getContext: () => ({ fillRect() {}, drawImage: (...args) => { imagePlacement = args; } }) };
-    const drawCanvas = { getContext: () => ({
+    const bgCanvas = { style: {}, getContext: () => ({ setTransform() {}, fillRect() {}, drawImage: (...args) => { imagePlacement = args; } }) };
+    const drawCanvas = { style: {}, getContext: () => ({ setTransform() {},
         clearRect() {}, beginPath() {}, moveTo() {},
         lineTo: (...args) => { strokeEndpoint = args; }, stroke() {},
     }) };
@@ -387,8 +387,8 @@ test('reopened answers retain their recorded paper and image placement', () => {
 test('older answers use their paper size to recover the cutout scale', () => {
     const saved = { canvasWidth: 1392, canvasHeight: 984, strokes: [], texts: [] };
     let imagePlacement;
-    const bgCanvas = { getContext: () => ({ fillRect() {}, drawImage: (...args) => { imagePlacement = args; } }) };
-    const drawCanvas = { getContext: () => ({ clearRect() {} }) };
+    const bgCanvas = { style: {}, getContext: () => ({ setTransform() {}, fillRect() {}, drawImage: (...args) => { imagePlacement = args; } }) };
+    const drawCanvas = { style: {}, getContext: () => ({ setTransform() {}, clearRect() {} }) };
     handler('initCanvas', {
         bgCanvasRef: { current: bgCanvas }, drawCanvasRef: { current: drawCanvas },
         questionLayoutRef: { current: undefined }, paperOrientation: 'landscape', initialAnswerState: saved,

@@ -1,5 +1,5 @@
 import { useAnswerWheel } from '@home-teacher/common/hooks/useAnswerWheel'
-import { pinchViewport, touchPair, useStrokeInput, drawStationaryStroke } from '@thousands-of-ties/drawing-common'
+import { pinchViewport, touchPair, useStrokeInput, drawStationaryStroke, resizeCanvasForDisplay, getCanvasLogicalSize } from '@thousands-of-ties/drawing-common'
 import { useRef, useState, useEffect, forwardRef, useImperativeHandle } from 'react'
 import { ICON_SVG } from '../../constants/icons'
 import type { PDFStudyAnswerState } from '@home-teacher/common/utils/indexedDB'
@@ -41,7 +41,8 @@ const toDrawingPath = (stroke: AnswerStroke): DrawingPath => ({
 
 const redrawAnswerStrokes = (canvas: HTMLCanvasElement, strokes: AnswerStroke[]) => {
   const ctx = canvas.getContext('2d')!
-  ctx.clearRect(0, 0, canvas.width, canvas.height)
+  const logicalSize = getCanvasLogicalSize(canvas)
+  ctx.clearRect(0, 0, logicalSize.width, logicalSize.height)
   for (const stroke of strokes) {
     if (stroke.points.length < 2) continue
     ctx.globalCompositeOperation = stroke.eraser ? 'destination-out' : 'source-over'
@@ -198,10 +199,8 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
     questionLayoutRef.current = { x: imageLeft, y: imageTop, width: imgW, height: imgH }
     console.log('[AnswerPanel] initCanvas:', { naturalW: img.naturalWidth, naturalH: img.naturalHeight, displayScale, imgW, imgH })
 
-    bgCanvas.width = w
-    bgCanvas.height = h
-    drawCanvas.width = w
-    drawCanvas.height = h
+    resizeCanvasForDisplay(bgCanvas, w, h)
+    resizeCanvasForDisplay(drawCanvas, w, h)
     console.log('[AnswerPanel] canvas size:', { w, h, orientation })
 
     const ctx = bgCanvas.getContext('2d')!
@@ -232,6 +231,7 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
         dCtx.lineWidth = stroke.width * lineScale
         dCtx.lineCap = 'round'
         dCtx.lineJoin = 'round'
+        if (drawStationaryStroke(dCtx, stroke.points.map(([x, y]) => ({ x: x * scaleX, y: y * scaleY })), stroke.width * lineScale)) continue
         dCtx.beginPath()
         dCtx.moveTo(stroke.points[0][0] * scaleX, stroke.points[0][1] * scaleY)
         for (const [x, y] of stroke.points.slice(1)) dCtx.lineTo(x * scaleX, y * scaleY)
@@ -270,7 +270,7 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
       setZoom(1.0)
       const container = containerRef.current
       const style = container ? getComputedStyle(container) : null
-      const imageWidth = bgCanvasRef.current?.width ?? 0
+      const imageWidth = bgCanvasRef.current ? getCanvasLogicalSize(bgCanvasRef.current).width : 0
       const availableWidth = container && style
         ? container.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
         : imageWidth
@@ -299,9 +299,10 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
     const canvas = drawCanvasRef.current
     if (!canvas || canvas.width === 0 || canvas.height === 0) return null
     const activeStroke = activeStrokeRef.current
+    const logicalSize = getCanvasLogicalSize(canvas)
     return {
-      canvasWidth: canvas.width,
-      canvasHeight: canvas.height,
+      canvasWidth: logicalSize.width,
+      canvasHeight: logicalSize.height,
       questionLayout: questionLayoutRef.current,
       strokes: activeStroke && activeStroke.points.length > 1
         ? [...strokesRef.current, activeStroke]
@@ -350,7 +351,8 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
     if (!drawCanvas) return
     saveSnapshot()
     const ctx = drawCanvas.getContext('2d')!
-    ctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height)
+    const logicalSize = getCanvasLogicalSize(drawCanvas)
+    ctx.clearRect(0, 0, logicalSize.width, logicalSize.height)
     strokesRef.current = []
     activeStrokeRef.current = null
     updateTextAnnotations([])
@@ -365,11 +367,12 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
     if (!bgCanvas || !drawCanvas) return null
 
     const out = document.createElement('canvas')
-    out.width = bgCanvas.width
-    out.height = bgCanvas.height
+    const logicalSize = getCanvasLogicalSize(bgCanvas)
+    out.width = logicalSize.width
+    out.height = logicalSize.height
     const ctx = out.getContext('2d')!
-    ctx.drawImage(bgCanvas, 0, 0)
-    ctx.drawImage(drawCanvas, 0, 0)
+    ctx.drawImage(bgCanvas, 0, 0, out.width, out.height)
+    ctx.drawImage(drawCanvas, 0, 0, out.width, out.height)
     textAnnotationsRef.current.forEach(annotation => drawAnswerText(ctx, annotation))
     return out.toDataURL('image/png')
   }
@@ -385,8 +388,9 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
   const getPos = (clientX: number, clientY: number): { x: number; y: number } => {
     const canvas = drawCanvasRef.current!
     const rect = canvas.getBoundingClientRect()
-    const scaleX = canvas.width / rect.width
-    const scaleY = canvas.height / rect.height
+    const logicalSize = getCanvasLogicalSize(canvas)
+    const scaleX = logicalSize.width / rect.width
+    const scaleY = logicalSize.height / rect.height
     return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY }
   }
 
@@ -394,9 +398,10 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
     if (editingTextRef.current || !drawCanvasRef.current) return
     const canvas = drawCanvasRef.current
     const pos = getPos(clientX, clientY)
+    const logicalSize = getCanvasLogicalSize(canvas)
     const editing = {
-      x: Math.max(0, Math.min(canvas.width - 1, pos.x)),
-      y: Math.max(0, Math.min(canvas.height - 1, pos.y)),
+      x: Math.max(0, Math.min(logicalSize.width - 1, pos.x)),
+      y: Math.max(0, Math.min(logicalSize.height - 1, pos.y)),
       initialText: '',
     }
     editingTextRef.current = editing
@@ -452,7 +457,7 @@ const AnswerPanel = forwardRef<AnswerPanelHandle, AnswerPanelProps>(({
     isDrawingRef.current = true
     const canvas = drawCanvasRef.current!
     const pos = getPos(clientX, clientY)
-    const scale = canvas.width / canvas.getBoundingClientRect().width
+    const scale = getCanvasLogicalSize(canvas).width / canvas.getBoundingClientRect().width
     lastPosRef.current = pos
     activeStrokeRef.current = {
       points: [[Math.round(pos.x * 10) / 10, Math.round(pos.y * 10) / 10]],
