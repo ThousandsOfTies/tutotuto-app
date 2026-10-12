@@ -1,4 +1,5 @@
-import { StudyToolbarNavigation, type BreadcrumbItem } from '@home-teacher/common/components/study/StudyToolbarNavigation'
+import { StudyToolbarFrame } from '@home-teacher/common/components/study/StudyToolbarFrame'
+import type { BreadcrumbItem } from '@home-teacher/common/components/study/StudyToolbarNavigation'
 import type { StudyViewControlsProps } from '@home-teacher/common/components/study/StudyViewControls'
 import { StudyEraserTool, StudyTextTool, type TextDirection } from '@home-teacher/common/components/study/StudyToolSettings'
 import { useStudyToolPopups } from '@home-teacher/common/hooks/useStudyToolPopups'
@@ -108,124 +109,119 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
     });
 
     return (
-        <div className="toolbar">
-            <StudyToolbarNavigation
-                onBack={onBack}
-                breadcrumbs={breadcrumbs}
-                viewControls={viewControls}
-                labels={{ home: appT('toolbar.home') }}
-            />
+        <StudyToolbarFrame
+            onBack={onBack}
+            breadcrumbs={breadcrumbs}
+            viewControls={viewControls}
+            homeLabel={appT('toolbar.home')}
+        >
 
-            {/* 右寄せコンテナ */}
-            <div className="toolbar-tools">
+            <>
+                <div className="divider"></div>
 
-                <>
-                    <div className="divider"></div>
+                {/* 描画ツール */}
+                <div style={{ position: 'relative' }}>
+                    <button
+                        onClick={handlePenClick}
+                        className={isDrawingMode ? 'active' : ''}
+                        title={isDrawingMode ? appT('toolbar.penOn') : appT('toolbar.penOff')}
+                    >
+                        <FiEdit2 size={20} color={isDrawingMode ? penColor : 'currentColor'} />
+                    </button>
 
-                    {/* 描画ツール */}
-                    <div style={{ position: 'relative' }}>
-                        <button
-                            onClick={handlePenClick}
-                            className={isDrawingMode ? 'active' : ''}
-                            title={isDrawingMode ? appT('toolbar.penOn') : appT('toolbar.penOff')}
-                        >
-                            <FiEdit2 size={20} color={isDrawingMode ? penColor : 'currentColor'} />
-                        </button>
-
-                        {/* ペン設定ポップアップ */}
-                        {isDrawingMode && showPenPopup && (
-                            <div className="tool-popup">
-                                <div className="popup-row">
-                                    <label>{appT('toolbar.colorLabel')}</label>
-                                    <input
-                                        type="color"
-                                        value={penColor}
-                                        onChange={(e) => setPenColor(e.target.value)}
-                                        className="color-swatch-input"
-                                    />
-                                </div>
+                    {/* ペン設定ポップアップ */}
+                    {isDrawingMode && showPenPopup && (
+                        <div className="tool-popup">
+                            <div className="popup-row">
+                                <label>{appT('toolbar.colorLabel')}</label>
+                                <input
+                                    type="color"
+                                    value={penColor}
+                                    onChange={(e) => setPenColor(e.target.value)}
+                                    className="color-swatch-input"
+                                />
                             </div>
-                        )}
-
-                        {showPenGuidance && (
-                            <div className="pen-guidance" role="status">
-                                {t('pdfGuide.penHint')}
-                            </div>
-                        )}
-                    </div>
-
-                    <StudyEraserTool
-                        active={isEraserMode}
-                        onClick={handleEraserClick}
-                        title={appT(isEraserMode ? 'toolbar.eraserOn' : 'toolbar.eraserOff')}
-                    />
-                    <StudyTextTool
-                        active={isTextMode}
-                        popupVisible={showTextPopup}
-                        onClick={handleTextClick}
-                        title={appT(isTextMode ? 'toolbar.textOn' : 'toolbar.textOff')}
-                        fontSize={textFontSize}
-                        setFontSize={setTextFontSize}
-                        direction={textDirection}
-                        setDirection={setTextDirection}
-                        color={penColor}
-                        setColor={setPenColor}
-                        labels={{
-                            size: appT('toolbar.size'), direction: appT('toolbar.direction'),
-                            horizontal: appT('toolbar.horizontal'),
-                            verticalRight: appT('toolbar.verticalRight'), verticalLeft: appT('toolbar.verticalLeft'),
-                            color: appT('toolbar.colorLabel'),
-                        }}
-                        colorInputClassName="color-swatch-input"
-                    />
-
-                    {/* Context-specific buttons */}
-                    {onGrade ? (
-                        /* Answer panel mode */
-                        <>
-                            <div className="divider"></div>
-                            {setSelectedModel && availableModels && (
-                                <select
-                                    value={selectedModel}
-                                    onChange={(e) => setSelectedModel(e.target.value)}
-                                >
-                                    <option value="default">{defaultModelName}</option>
-                                    {availableModels.map(m => (
-                                        <option key={m.id} value={m.id}>{m.name}</option>
-                                    ))}
-                                </select>
-                            )}
-                            <button
-                                onClick={onGrade}
-                                disabled={isGrading}
-                                className="btn-submit"
-                                title={submissionKind === 'ask' ? appT('toolbar.ask') : appT('toolbar.grade')}
-                                aria-label={submissionKind === 'ask' ? appT('toolbar.ask') : appT('toolbar.grade')}
-                                style={{
-                                    cursor: isGrading ? 'wait' : 'pointer',
-                                    opacity: isGrading ? 0.6 : 1,
-                                    transition: 'all 0.15s',
-                                }}
-                            >
-                                {isGrading ? <FiLoader size={20} className="animate-spin" /> : submissionKind === 'ask' ? <FiMessageCircle size={20} /> : <FiCheckCircle size={20} />}
-                            </button>
-                        </>
-                    ) : (
-                        /* PDF mode: range selection button */
-                        <>
-                            <div className="divider"></div>
-                            <button
-                                onClick={isSelectionMode ? cancelSelection : startGrading}
-                                className={isSelectionMode ? 'active' : ''}
-                                disabled={isGrading}
-                                title={isSelectionMode ? t('gradingConfirmation.cancel') : t('pdfGuide.rangeSelection')}
-                            >
-                                {isGrading ? <FiLoader size={20} className="animate-spin" /> : <BiSelection size={20} className="icon-scale-13" />}
-                            </button>
-                        </>
+                        </div>
                     )}
-                </>
-            </div>
-        </div>
+
+                    {showPenGuidance && (
+                        <div className="pen-guidance" role="status">
+                            {t('pdfGuide.penHint')}
+                        </div>
+                    )}
+                </div>
+
+                <StudyEraserTool
+                    active={isEraserMode}
+                    onClick={handleEraserClick}
+                    title={appT(isEraserMode ? 'toolbar.eraserOn' : 'toolbar.eraserOff')}
+                />
+                <StudyTextTool
+                    active={isTextMode}
+                    popupVisible={showTextPopup}
+                    onClick={handleTextClick}
+                    title={appT(isTextMode ? 'toolbar.textOn' : 'toolbar.textOff')}
+                    fontSize={textFontSize}
+                    setFontSize={setTextFontSize}
+                    direction={textDirection}
+                    setDirection={setTextDirection}
+                    color={penColor}
+                    setColor={setPenColor}
+                    labels={{
+                        size: appT('toolbar.size'), direction: appT('toolbar.direction'),
+                        horizontal: appT('toolbar.horizontal'),
+                        verticalRight: appT('toolbar.verticalRight'), verticalLeft: appT('toolbar.verticalLeft'),
+                        color: appT('toolbar.colorLabel'),
+                    }}
+                    colorInputClassName="color-swatch-input"
+                />
+
+                {/* Context-specific buttons */}
+                {onGrade ? (
+                    /* Answer panel mode */
+                    <>
+                        <div className="divider"></div>
+                        {setSelectedModel && availableModels && (
+                            <select
+                                value={selectedModel}
+                                onChange={(e) => setSelectedModel(e.target.value)}
+                            >
+                                <option value="default">{defaultModelName}</option>
+                                {availableModels.map(m => (
+                                    <option key={m.id} value={m.id}>{m.name}</option>
+                                ))}
+                            </select>
+                        )}
+                        <button
+                            onClick={onGrade}
+                            disabled={isGrading}
+                            className="btn-submit"
+                            title={submissionKind === 'ask' ? appT('toolbar.ask') : appT('toolbar.grade')}
+                            aria-label={submissionKind === 'ask' ? appT('toolbar.ask') : appT('toolbar.grade')}
+                            style={{
+                                cursor: isGrading ? 'wait' : 'pointer',
+                                opacity: isGrading ? 0.6 : 1,
+                                transition: 'all 0.15s',
+                            }}
+                        >
+                            {isGrading ? <FiLoader size={20} className="animate-spin" /> : submissionKind === 'ask' ? <FiMessageCircle size={20} /> : <FiCheckCircle size={20} />}
+                        </button>
+                    </>
+                ) : (
+                    /* PDF mode: range selection button */
+                    <>
+                        <div className="divider"></div>
+                        <button
+                            onClick={isSelectionMode ? cancelSelection : startGrading}
+                            className={isSelectionMode ? 'active' : ''}
+                            disabled={isGrading}
+                            title={isSelectionMode ? t('gradingConfirmation.cancel') : t('pdfGuide.rangeSelection')}
+                        >
+                            {isGrading ? <FiLoader size={20} className="animate-spin" /> : <BiSelection size={20} className="icon-scale-13" />}
+                        </button>
+                    </>
+                )}
+            </>
+        </StudyToolbarFrame>
     );
 };
