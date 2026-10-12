@@ -1,4 +1,5 @@
 import { StudyToolbarNavigation, type BreadcrumbItem } from '@home-teacher/common/components/study/StudyToolbarNavigation'
+import type { StudyViewControlsProps } from '@home-teacher/common/components/study/StudyViewControls'
 import { StudyEraserTool, StudyTextTool, type TextDirection } from '@home-teacher/common/components/study/StudyToolSettings'
 import { useStudyToolPopups } from '@home-teacher/common/hooks/useStudyToolPopups'
 export type { BreadcrumbItem } from '@home-teacher/common/components/study/StudyToolbarNavigation'
@@ -12,6 +13,7 @@ import { BiSelection } from 'react-icons/bi';
 interface StudyToolbarProps {
     onBack?: () => void;
     breadcrumbs?: BreadcrumbItem[];
+    viewControls: StudyViewControlsProps;
 
     // Grading
     isSelectionMode: boolean;
@@ -49,6 +51,7 @@ interface StudyToolbarProps {
 export const StudyToolbar: React.FC<StudyToolbarProps> = ({
     onBack,
     breadcrumbs,
+    viewControls,
     isSelectionMode,
     isGrading,
     startGrading,
@@ -109,6 +112,7 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
             <StudyToolbarNavigation
                 onBack={onBack}
                 breadcrumbs={breadcrumbs}
+                viewControls={viewControls}
                 labels={{ home: appT('toolbar.home') }}
             />
 
