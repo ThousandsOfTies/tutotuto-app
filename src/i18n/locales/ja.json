@@ -19,7 +19,7 @@
   "toolbar": {
     "home": "ホームに戻る",
     "penOff": "ペンモード OFF",
-    "eraserOn": "消しゴムモード ON（クリックで設定）",
+    "eraserOn": "消しゴムモード ON",
     "eraserOff": "消しゴムモード OFF",
     "textOn": "テキストモード ON（クリックで設定）",
     "textOff": "テキストモード OFF",
@@ -29,13 +29,7 @@
     "horizontal": "横書き (Z型)",
     "verticalRight": "縦書き右始 (N型)",
     "verticalLeft": "縦書き左始",
-    "split": "2画面表示 (Split View)",
-    "single": "シングルビューへ切替",
-    "switchPane": "A/B 切替",
     "penOn": "ペンモード ON（クリックで設定）",
-    "width": "太さ:",
-    "swap": "A/Bを左右入れ替え",
-    "splitLabel": "2画面表示",
     "ask": "先生に質問する",
     "grade": "採点する"
   },

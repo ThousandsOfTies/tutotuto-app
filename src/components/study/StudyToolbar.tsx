@@ -12,11 +12,6 @@ import { BiSelection } from 'react-icons/bi';
 interface StudyToolbarProps {
     onBack?: () => void;
     breadcrumbs?: BreadcrumbItem[];
-    pageViewControlsEnabled: boolean;
-    isSplitView: boolean;
-    toggleSplitView: () => void;
-    activeTab: 'A' | 'B';
-    toggleActiveTab: () => void;
 
     // Grading
     isSelectionMode: boolean;
@@ -37,14 +32,10 @@ interface StudyToolbarProps {
     toggleDrawingMode: () => void;
     penColor: string;
     setPenColor: (color: string) => void;
-    penSize: number;
-    setPenSize: (size: number) => void;
 
     // Eraser Tool
     isEraserMode: boolean;
     toggleEraserMode: () => void;
-    eraserSize: number;
-    setEraserSize: (size: number) => void;
 
     // Answer panel actions (shown when on answer panel)
     onGrade?: () => void;
@@ -58,11 +49,6 @@ interface StudyToolbarProps {
 export const StudyToolbar: React.FC<StudyToolbarProps> = ({
     onBack,
     breadcrumbs,
-    pageViewControlsEnabled,
-    isSplitView,
-    toggleSplitView,
-    activeTab,
-    toggleActiveTab,
     isSelectionMode,
     isGrading,
     startGrading,
@@ -77,12 +63,8 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
     toggleDrawingMode,
     penColor,
     setPenColor,
-    penSize,
-    setPenSize,
     isEraserMode,
     toggleEraserMode,
-    eraserSize,
-    setEraserSize,
     onGrade,
     submissionKind = 'grade',
     selectedModel,
@@ -102,7 +84,7 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
     }, []);
 
     const {
-        showTextPopup, showPenPopup, showEraserPopup,
+        showTextPopup, showPenPopup,
         handleTextClick, handlePenClick, handleEraserClick,
     } = useStudyToolPopups({
         text: { active: isTextMode, toggle: toggleTextMode },
@@ -127,18 +109,7 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
             <StudyToolbarNavigation
                 onBack={onBack}
                 breadcrumbs={breadcrumbs}
-                pageViewControlsEnabled={pageViewControlsEnabled}
-                isSplitView={isSplitView}
-                toggleSplitView={toggleSplitView}
-                activeTab={activeTab}
-                toggleActiveTab={toggleActiveTab}
-                labels={{
-                    home: appT('toolbar.home'),
-                    switchPane: appT(isSplitView ? 'toolbar.single' : 'toolbar.switchPane'),
-                    splitView: appT(isSplitView ? 'toolbar.swap' : 'toolbar.split'),
-                    switchPaneAriaLabel: appT(isSplitView ? 'toolbar.single' : 'toolbar.switchPane'),
-                    splitViewAriaLabel: appT(isSplitView ? 'toolbar.swap' : 'toolbar.splitLabel'),
-                }}
+                labels={{ home: appT('toolbar.home') }}
             />
 
             {/* 右寄せコンテナ */}
@@ -169,19 +140,6 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
                                         className="color-swatch-input"
                                     />
                                 </div>
-                                <div className="popup-row">
-                                    <label>{appT('toolbar.width')}</label>
-                                    <input
-                                        type="range"
-                                        min="1"
-                                        max="10"
-                                        step="1"
-                                        value={penSize}
-                                        onChange={(e) => setPenSize(Number(e.target.value))}
-                                        style={{ width: '100px' }}
-                                    />
-                                    <span>{penSize}px</span>
-                                </div>
                             </div>
                         )}
 
@@ -194,12 +152,8 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
 
                     <StudyEraserTool
                         active={isEraserMode}
-                        popupVisible={showEraserPopup}
                         onClick={handleEraserClick}
                         title={appT(isEraserMode ? 'toolbar.eraserOn' : 'toolbar.eraserOff')}
-                        size={eraserSize}
-                        setSize={setEraserSize}
-                        sizeLabel={appT('toolbar.size')}
                     />
                     <StudyTextTool
                         active={isTextMode}
