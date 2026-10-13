@@ -4,11 +4,14 @@ import { viteStaticCopy } from 'vite-plugin-static-copy'
 import { VitePWA } from 'vite-plugin-pwa'
 import path from 'path'
 import { createDeferredAssets } from '../home-teacher-common/build/deferredAssets.mjs'
+import { PREDEFINED_SNS } from '../home-teacher-common/src/constants/sns'
 
 import { execSync } from 'child_process'
 
 // Gitハッシュの取得
 const commitHash = execSync('git rev-parse --short HEAD', { cwd: __dirname }).toString().trim()
+const defaultSNSLinks = PREDEFINED_SNS.filter(sns => sns.id === 'youtube')
+  .map(({ id, name, defaultUrl, icon }) => ({ id, name, url: defaultUrl, icon }))
 
 // 起動中のクライアントが公開済みの最新版を確認するためのメタデータ。
 // ハッシュ付きアセットとは別名にして、常に同じURLから取得する。
@@ -44,7 +47,8 @@ export default defineConfig(({ mode }) => {
     base: basePath,
     define: {
       'import.meta.env.VITE_APP_COMMIT_HASH': JSON.stringify(commitHash),
-      'import.meta.env.VITE_INDEXED_DB_NAME': JSON.stringify('TutoTutoDB')
+      'import.meta.env.VITE_INDEXED_DB_NAME': JSON.stringify('TutoTutoDB'),
+      'import.meta.env.VITE_DEFAULT_SNS_LINKS': JSON.stringify(defaultSNSLinks)
     },
     resolve: {
       alias: {

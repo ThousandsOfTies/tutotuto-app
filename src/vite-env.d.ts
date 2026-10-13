@@ -9,6 +9,7 @@ interface ImportMetaEnv {
   readonly VITE_THEME_COLOR?: string
   readonly VITE_FEATURE_GRADING?: string
   readonly VITE_FEATURE_SNS?: string
+  readonly VITE_DEFAULT_SNS_LINKS?: Omit<import('@home-teacher/common/utils/indexedDB').SNSLinkRecord, 'createdAt'>[]
   readonly VITE_ADSENSE_CLIENT_ID?: string
   readonly BASE_URL?: string
 }
