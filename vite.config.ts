@@ -64,6 +64,7 @@ export default defineConfig(({ mode }) => {
         targets: [
           { src: 'src/i18n/locales/ja.json', dest: 'locales/ja', rename: 'translation.json' },
           { src: 'src/i18n/locales/en.json', dest: 'locales/en', rename: 'translation.json' },
+          { src: '../home-teacher-common/src/utils/browserNotifications.js', dest: '' },
           {
             src: 'node_modules/pdfjs-dist/build/pdf.worker.min.mjs',
             dest: '',
@@ -91,6 +92,7 @@ export default defineConfig(({ mode }) => {
 
         manifest: false,
         workbox: {
+          importScripts: ['notification-events.js'],
           manifestTransforms: [deferredAssets.manifestTransform],
           cleanupOutdatedCaches: true,
           skipWaiting: false,

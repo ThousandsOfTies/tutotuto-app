@@ -136,6 +136,17 @@
     #countdownView {
       display: none;
     }
+    .return-button {
+      margin-top: 20px;
+      padding: 14px 28px;
+      border: none;
+      border-radius: 12px;
+      background: white;
+      color: #493b86;
+      font-size: 18px;
+      font-weight: 600;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
@@ -145,6 +156,7 @@
       <div class="icon">📱</div>
       <h1 data-i18n="pages.manage.choose"></h1>
       <p id="timeLimit" data-i18n="pages.manage.initialLimit"></p>
+      <p class="small" data-i18n="pages.manage.backgroundNotice"></p>
       <div class="sns-grid" id="snsGrid"></div>
     </div>
 
@@ -157,11 +169,13 @@
       <div id="countdown" style="font-size: 64px; font-weight: bold; margin: 30px 0; color: #ffd700;">--:--</div>
       <div class="instruction" id="instruction" style="display: none;" data-i18n-lines="pages.manage.instruction"></div>
       <p class="small" id="warningMessage" style="display: none;" data-i18n="pages.manage.warning"></p>
+      <button type="button" class="return-button" id="returnToStudy" data-i18n="pages.manage.returnToStudy"></button>
     </div>
   </div>
 
   <script type="module">
     import { loadPageTranslations } from './page-i18n.js';
+    import { showBrowserNotification } from './browserNotifications.js';
     const t = await loadPageTranslations();
     // IndexedDB関連関数
     const DB_NAME = 'TutoTutoDB';
@@ -207,6 +221,7 @@
     const returnUrl = params.get('returnUrl'); // 戻り先URL
     const snsLinksJson = params.get('snsLinks');
     let timeLimitMinutes = parseInt(params.get('time') || '0');
+    let notificationsEnabled = false;
 
     // データベースから設定を読み込む
     async function loadSettingsFromDB() {
@@ -226,10 +241,14 @@
     }
 
     async function initPage() {
+      const settings = await loadSettingsFromDB().catch(error => {
+        console.error('設定の取得に失敗:', error);
+        return null;
+      });
+      notificationsEnabled = settings?.notificationEnabled === true;
       // 1. 制限時間の決定 (URLになければDBから)
-      if (timeLimitMinutes <= 0) {
+      if (!Number.isFinite(timeLimitMinutes) || timeLimitMinutes <= 0) {
         console.log('🔍 DBから設定をロード中...');
-        const settings = await loadSettingsFromDB();
         if (settings && settings.snsTimeLimitMinutes) {
           timeLimitMinutes = settings.snsTimeLimitMinutes;
           console.log('✅ DBから制限時間を取得:', timeLimitMinutes);
@@ -369,6 +388,8 @@
 
     // カウントダウンタイマー
     let countdownTimerId = null;  // タイマーIDを保存
+    let titleFlashInterval = null;
+    let updateCountdown = null;
 
     function startCountdown(startTime) {
       const countdownElement = document.getElementById('countdown');
@@ -377,10 +398,11 @@
       const warningMessageElement = document.getElementById('warningMessage');
       const iconElement = document.getElementById('icon');
 
-      // タイトルを点滅させる（時間切れ時）
-      let titleFlashInterval = null;
-
-      const updateCountdown = () => {
+      updateCountdown = () => {
+        // A resumed page may run a visibility event and a delayed timer together.
+        // Expire only once, and replace the pending tick when resynchronizing.
+        if (isTimeUp) return;
+        stopCountdown();
         const now = Date.now();
         const elapsed = now - startTime;
         const remaining = (timeLimitMinutes * 60 * 1000) - elapsed;
@@ -391,7 +413,7 @@
 
           // 時間切れ
           countdownElement.textContent = '00:00';
-          countdownElement.style.color = '#ff4444';
+          countdownElement.style.color = '#ffffff';
           titleElement.textContent = t('pages.manage.timeUp');
           instructionElement.style.display = 'block';
           warningMessageElement.style.display = 'block';
@@ -402,6 +424,7 @@
           iconElement.classList.add('warning-pulse');
 
           // タブタイトルを点滅
+          document.title = t('pages.manage.warningIconTitle');
           titleFlashInterval = setInterval(() => {
             document.title = document.title.startsWith('⚠️')
               ? t('pages.manage.warningTitle')
@@ -448,45 +471,38 @@
     // 通知・バイブレーションのインターバルID（停止用）
     let notificationIntervalId = null;
     let vibrationIntervalId = null;
+    let notificationInFlight = false;
 
     // 通知を送信
     function sendNotification() {
+      if (!notificationsEnabled) return;
       const snsName = document.getElementById('snsName').textContent;
-
-      if (!('Notification' in window)) {
-        console.log('このブラウザは通知をサポートしていません');
-        return;
-      }
-
-      if (Notification.permission === 'granted') {
-        const notification = new Notification(t('pages.manage.notificationTitle', { name: snsName }), {
-          body: t('pages.manage.notificationBody', { minutes: timeLimitMinutes }),
-          icon: '/pwa-192x192.png',
-          badge: '/pwa-192x192.png',
-          vibrate: [200, 100, 200, 100, 200],
-          requireInteraction: true,
-          tag: 'time-limit',
-          renotify: true
-        });
-
-        notification.onclick = () => {
-          window.focus();
-          notification.close();
-        };
-
-        // 5秒ごとに通知を再送（バックグラウンドでも通知）
-        notificationIntervalId = setInterval(() => {
-          if (Notification.permission === 'granted') {
-            new Notification(t('pages.manage.reminderTitle', { name: snsName }), {
-              body: t('pages.manage.reminderBody'),
-              icon: '/pwa-192x192.png',
-              vibrate: [300, 100, 300],
-              tag: 'time-limit',
-              renotify: true
+      const notify = async (reminder = false) => {
+        if (notificationInFlight) return;
+        notificationInFlight = true;
+        try {
+          const shown = await showBrowserNotification(
+            t(reminder ? 'pages.manage.reminderTitle' : 'pages.manage.notificationTitle', { name: snsName }), {
+              body: reminder ? t('pages.manage.reminderBody') : t('pages.manage.notificationBody', { minutes: timeLimitMinutes }),
+              icon: new URL('app.png', window.location.href).href,
+              vibrate: [200, 100, 200, 100, 200],
+              requireInteraction: true,
+              tag: 'tutotuto-time-limit',
+              renotify: true,
+              data: { url: window.location.href }
             });
-          }
-        }, 5000);
-      }
+          if (!shown) document.getElementById('warningMessage').textContent = t('pages.manage.notificationUnavailable');
+        } catch (error) {
+          console.error('時間切れ通知の送信に失敗:', error);
+          document.getElementById('warningMessage').textContent = t('pages.manage.notificationUnavailable');
+        } finally {
+          notificationInFlight = false;
+        }
+      };
+      void notify();
+      notificationIntervalId = setInterval(() => {
+        if (document.hidden) void notify(true);
+      }, 5000);
     }
 
     // バイブレーションを開始
@@ -512,6 +528,10 @@
 
     // 通知・バイブレーションを停止
     function stopWarnings() {
+      if (titleFlashInterval) {
+        clearInterval(titleFlashInterval);
+        titleFlashInterval = null;
+      }
       if (notificationIntervalId) {
         clearInterval(notificationIntervalId);
         notificationIntervalId = null;
@@ -520,52 +540,30 @@
         clearInterval(vibrationIntervalId);
         vibrationIntervalId = null;
       }
-      console.log('⏸️ 警告を停止（バックグラウンド）');
+      if ('vibrate' in navigator) navigator.vibrate(0);
+      navigator.serviceWorker?.getRegistration().then(async registration => {
+        const notifications = await registration?.getNotifications({ tag: 'tutotuto-time-limit' });
+        notifications?.forEach(notification => notification.close());
+      }).catch(error => console.error('通知を閉じられませんでした:', error));
     }
 
     // 時間切れ状態かどうかを追跡
     let isTimeUp = false;
 
-    // ページの表示状態が変わったとき（フォアグラウンド⇔バックグラウンド）
-    document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) {
-        // フォアグラウンドに戻った
-        const countdownView = document.getElementById('countdownView');
-        if (countdownView.style.display === 'block') {
-          console.log('▶️ 警告画面に復帰');
-
-          // SNSタブを閉じた場合は常にドリル画面に戻る（時間切れ前後を問わず）
-          console.log('✅ SNSタブを閉じました。ドリル画面に戻ります。');
-
-          // すべてのタイマーと警告を停止
-          stopCountdown();
-          stopWarnings();
-
-          // ドリル画面に戻る
-          // returnUrlパラメータがあればそれを使用（確実性向上）、なければ従来の方法
-          let baseUrl;
-          if (returnUrl) {
-            baseUrl = returnUrl;
-            console.log('✅ returnUrlパラメータを使用:', baseUrl);
-          } else {
-            // フォールバック: 従来の方法
-            const pathParts = window.location.pathname.split('/');
-            pathParts.pop(); // manage.htmlを削除
-            baseUrl = window.location.origin + pathParts.join('/') + '/';
-            console.log('⚠️ returnUrlパラメータなし、従来の方法を使用:', baseUrl);
-          }
-
-          // iPad対応: 少し待機してからリロード（IndexedDBの準備を待つ）
-          setTimeout(() => {
-            console.log('🏠 ドリル画面に戻ります:', baseUrl);
-            window.location.replace(baseUrl);
-          }, 300);
-        }
-      } else {
-        // バックグラウンドに移動（SNSタブを開いた）
-        console.log('⏸️ バックグラウンドに移動');
-      }
+    document.getElementById('returnToStudy').addEventListener('click', () => {
+      stopCountdown();
+      stopWarnings();
+      updateCountdown = null;
+      window.location.replace(returnUrl || new URL('./', window.location.href).href);
     });
+
+    // iOS may suspend background timers. Recompute from the original start time
+    // when the page resumes, and leave the warning visible until acknowledged.
+    function refreshCountdown() {
+      if (!document.hidden && updateCountdown) updateCountdown();
+    }
+    document.addEventListener('visibilitychange', refreshCountdown);
+    window.addEventListener('pageshow', refreshCountdown);
 
     console.log('📱 SNS選択画面を表示:', { timeLimitMinutes, snsLinksCount: snsLinks.length });
   </script>

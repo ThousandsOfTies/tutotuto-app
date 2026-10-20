@@ -13,4 +13,9 @@ for (const language of ['ja', 'en']) {
 }
 assert.ok(fs.existsSync(path.join(output, 'page-i18n.js')))
 assert.ok(sw.includes('page-i18n.js'))
+const notificationSource = fs.readFileSync('../home-teacher-common/src/utils/browserNotifications.js', 'utf8')
+assert.equal(fs.readFileSync(path.join(output, 'browserNotifications.js'), 'utf8'), notificationSource)
+assert.ok(sw.includes('browserNotifications.js'), 'mobile notification helper must be available offline')
+assert.ok(fs.existsSync(path.join(output, 'notification-events.js')))
+assert.ok(sw.includes('notification-events.js'), 'the worker must load notification click handling')
 console.log('Verified canonical page translations and offline caching for both languages.')
