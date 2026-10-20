@@ -68,7 +68,7 @@ async function timerHarness({ notificationEnabled = true, mobile = true, notific
     return request;
   } };
   const context = vm.createContext({ window, document, navigator, indexedDB, Notification, URL, URLSearchParams,
-    Date: { now: () => now },
+    Date: class extends Date { static now() { return now; } },
     console: { log() {}, error: (...args) => errors.push(args) },
     loadPageTranslations: async () => createPageTranslator(resources),
     alert: () => assert.fail('Unexpected popup-blocked alert'),
@@ -110,6 +110,8 @@ test('mobile time-up uses the active worker and a valid application-relative ico
   assert.equal(new URL(h.sent[0].options.icon).pathname, '/TutoTuto/app.png');
   assert.equal(h.element('countdown').textContent, '00:00');
   assert.equal(h.element('instruction').style.display, 'block');
+  assert.match(h.element('detectedEndTime').textContent, /page in background/);
+  assert.match(h.element('notificationStatus').textContent, /accepted the notification request/);
 });
 
 test('switching back to the timer does not silently cancel it before the deadline', async () => {
@@ -130,6 +132,9 @@ test('resuming after iOS suspended the page shows time-up once and waits for ack
   h.jump(70000); await h.resume();
   assert.equal(h.element('countdown').textContent, '00:00');
   assert.equal(h.element('title').textContent, 'Time is up');
+  const timeFormat = { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false };
+  assert.equal(h.element('expectedEndTime').textContent, `Expected end: ${new Date(1060000).toLocaleTimeString(undefined, timeFormat)}`);
+  assert.equal(h.element('detectedEndTime').textContent, `End detected: ${new Date(1070000).toLocaleTimeString(undefined, timeFormat)} (page visible)`);
   await h.resume(); await h.resume();
   assert.equal(h.sent.length, 1);
   assert.equal(h.navigations.length, 0);
@@ -146,6 +151,7 @@ test('notification failures leave the visible warning and vibration working', as
   assert.ok(h.vibrations.length > 0);
   assert.ok(h.errors.length > 0);
   assert.match(h.element('warningMessage').textContent, /notification/i);
+  assert.match(h.element('notificationStatus').textContent, /Notification unavailable/);
 });
 
 test('disabled notifications do not send browser notifications even when permission is granted', async () => {
@@ -154,4 +160,5 @@ test('disabled notifications do not send browser notifications even when permiss
   await h.advance(66000);
   assert.equal(h.sent.length, 0);
   assert.equal(h.element('countdown').textContent, '00:00');
+  assert.match(h.element('notificationStatus').textContent, /turned off in the app settings/);
 });

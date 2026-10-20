@@ -29,6 +29,7 @@
       }
     }
     .container {
+      box-sizing: border-box;
       text-align: center;
       padding: 40px;
       background: rgba(255, 255, 255, 0.1);
@@ -147,6 +148,20 @@
       font-weight: 600;
       cursor: pointer;
     }
+    .notification-info {
+      margin-top: 20px;
+      text-align: left;
+      font-size: 14px;
+    }
+    .notification-info summary {
+      cursor: pointer;
+    }
+    .notification-info p {
+      font-size: 12px;
+      margin: 8px 0;
+      opacity: 1;
+      overflow-wrap: anywhere;
+    }
   </style>
 </head>
 <body>
@@ -170,6 +185,12 @@
       <div class="instruction" id="instruction" style="display: none;" data-i18n-lines="pages.manage.instruction"></div>
       <p class="small" id="warningMessage" style="display: none;" data-i18n="pages.manage.warning"></p>
       <button type="button" class="return-button" id="returnToStudy" data-i18n="pages.manage.returnToStudy"></button>
+      <details class="notification-info">
+        <summary data-i18n="pages.manage.notificationInfo"></summary>
+        <p id="expectedEndTime"></p>
+        <p id="detectedEndTime" data-i18n="pages.manage.waitingForTimeUp"></p>
+        <p id="notificationStatus" aria-live="polite" data-i18n="pages.manage.waitingForTimeUp"></p>
+      </details>
     </div>
   </div>
 
@@ -391,12 +412,21 @@
     let titleFlashInterval = null;
     let updateCountdown = null;
 
+    function formatTime(timestamp) {
+      return new Date(timestamp).toLocaleTimeString(undefined, {
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+      });
+    }
+
     function startCountdown(startTime) {
       const countdownElement = document.getElementById('countdown');
       const titleElement = document.getElementById('title');
       const instructionElement = document.getElementById('instruction');
       const warningMessageElement = document.getElementById('warningMessage');
       const iconElement = document.getElementById('icon');
+      document.getElementById('expectedEndTime').textContent = t('pages.manage.expectedEndTime', {
+        time: formatTime(startTime + timeLimitMinutes * 60 * 1000)
+      });
 
       updateCountdown = () => {
         // A resumed page may run a visibility event and a delayed timer together.
@@ -410,6 +440,10 @@
         if (remaining <= 0) {
           // 時間切れフラグを立てる
           isTimeUp = true;
+          document.getElementById('detectedEndTime').textContent = t('pages.manage.detectedEndTime', {
+            time: formatTime(now),
+            state: t(document.hidden ? 'pages.manage.detectedInBackground' : 'pages.manage.detectedWhileVisible')
+          });
 
           // 時間切れ
           countdownElement.textContent = '00:00';
@@ -475,11 +509,16 @@
 
     // 通知を送信
     function sendNotification() {
-      if (!notificationsEnabled) return;
+      const status = document.getElementById('notificationStatus');
+      if (!notificationsEnabled) {
+        status.textContent = t('pages.manage.notificationsOff');
+        return;
+      }
       const snsName = document.getElementById('snsName').textContent;
       const notify = async (reminder = false) => {
         if (notificationInFlight) return;
         notificationInFlight = true;
+        status.textContent = t('pages.manage.notificationSending');
         try {
           const shown = await showBrowserNotification(
             t(reminder ? 'pages.manage.reminderTitle' : 'pages.manage.notificationTitle', { name: snsName }), {
@@ -491,10 +530,14 @@
               renotify: true,
               data: { url: window.location.href }
             });
+          status.textContent = t(shown ? 'pages.manage.notificationAccepted' : 'pages.manage.notificationUnavailable');
           if (!shown) document.getElementById('warningMessage').textContent = t('pages.manage.notificationUnavailable');
         } catch (error) {
           console.error('時間切れ通知の送信に失敗:', error);
           document.getElementById('warningMessage').textContent = t('pages.manage.notificationUnavailable');
+          status.textContent = t('pages.manage.notificationError', {
+            reason: error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+          });
         } finally {
           notificationInFlight = false;
         }
