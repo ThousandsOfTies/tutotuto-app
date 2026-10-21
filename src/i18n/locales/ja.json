@@ -53,13 +53,13 @@
     "gradingFailed": "採点に失敗しました",
     "imageTooSmall": "Image too small",
     "imageLoad": "Image load error",
-    "aiMonthlyLimit": "今月のAI利用回数の上限に達しました。翌月に再開できます。",
+    "aiMonthlyLimit": "今月のAI利用回数の上限に達しました。",
     "aiUsageUnavailable": "利用回数を確認できません。保存領域を確認して、もう一度お試しください。"
   },
   "usage": {
     "loading": "AI利用回数を確認中…",
     "remaining": "今月のAI：残り{{remaining}}回／{{limit}}回",
-    "reset": "採点・追加質問を合算。毎月1日（日本時間）に更新"
+    "cleanup": "採点・追加質問の回答を合算。PDFを開くと当月以外の利用ログを整理"
   },
   "answer": {
     "title": "先生の回答",

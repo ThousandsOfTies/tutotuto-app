@@ -1,28 +1,37 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getAppSettings } from '@home-teacher/common/utils/indexedDB'
 import messages from '../i18n/locales/ja.json'
-import { AI_USAGE_CHANGED_KEY, getMonthlyAiUsage, recordMonthlyAiRequest, type MonthlyAiUsage } from './monthlyAiUsage'
+import { AI_USAGE_CHANGED_KEY, getMonthlyAiUsage, recordMonthlyAiResponse, type MonthlyAiUsage } from './monthlyAiUsage'
 
 export function useMonthlyAiUsage(pdfId: string, accountPremium?: boolean) {
   const [usage, setUsage] = useState<MonthlyAiUsage | null>(null)
   const [unavailable, setUnavailable] = useState(false)
   const generation = useRef(0)
+  const openedPdf = useRef<string | null>(null)
   const resolvePremium = useCallback(async () => accountPremium ?? (await getAppSettings()).isPremium === true, [accountPremium])
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (prune = false) => {
     const version = ++generation.current
     try {
-      const next = await getMonthlyAiUsage(await resolvePremium())
+      const next = await getMonthlyAiUsage(await resolvePremium(), Date.now(), { prune })
       if (version === generation.current) { setUsage(next); setUnavailable(false) }
+      return next
     } catch {
       if (version === generation.current) setUnavailable(true)
+      return null
     }
   }, [resolvePremium])
+
+  const canRequest = useCallback(async () => {
+    const latest = await refresh()
+    if (!latest) throw new Error(messages.errors.aiUsageUnavailable)
+    return latest.remaining > 0
+  }, [refresh])
 
   const record = useCallback(async () => {
     const version = ++generation.current
     try {
-      const result = await recordMonthlyAiRequest(await resolvePremium())
+      const result = await recordMonthlyAiResponse(await resolvePremium())
       if (version === generation.current) { setUsage(result.usage); setUnavailable(false) }
       if (result.recorded) {
         // Wake other tabs without storing request details in localStorage.
@@ -36,7 +45,9 @@ export function useMonthlyAiUsage(pdfId: string, accountPremium?: boolean) {
   }, [resolvePremium])
 
   useEffect(() => {
-    void refresh()
+    const prune = openedPdf.current !== pdfId
+    openedPdf.current = pdfId
+    void refresh(prune)
     const onStorage = (event: StorageEvent) => {
       if (event.key === AI_USAGE_CHANGED_KEY || event.key === null) void refresh()
     }
@@ -45,16 +56,13 @@ export function useMonthlyAiUsage(pdfId: string, accountPremium?: boolean) {
     window.addEventListener('focus', onFocus)
     window.addEventListener('storage', onStorage)
     document.addEventListener('visibilitychange', onVisible)
-    // Also notices the month changing while the PDF is left open.
-    const timer = window.setInterval(() => { void refresh() }, 60_000)
     return () => {
       ++generation.current
-      window.clearInterval(timer)
       window.removeEventListener('focus', onFocus)
       window.removeEventListener('storage', onStorage)
       document.removeEventListener('visibilitychange', onVisible)
     }
   }, [pdfId, refresh])
 
-  return { usage, unavailable, disabled: !usage || unavailable || usage.remaining === 0, refresh, record }
+  return { usage, unavailable, disabled: !usage || unavailable || usage.remaining === 0, canRequest, refresh, record }
 }

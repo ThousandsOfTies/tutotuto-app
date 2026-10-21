@@ -18,23 +18,22 @@ export interface MonthlyAiUsage {
   used: number
   limit: number
   remaining: number
-  resetsAt: number
 }
 
-async function updateUsage(premium: boolean, record: boolean, now: number) {
+async function updateUsage(premium: boolean, record: boolean, now: number, prune = false) {
   const period = aiUsagePeriod(now)
   const limit = AI_MONTHLY_LIMITS[premium ? 'premium' : 'free']
   const result = await updateRequestUsageLog(FEATURE, period.start, period.end,
-    record ? { timestamp: now, limit } : undefined)
+    record ? { timestamp: now } : undefined, { prune })
   return { recorded: result.recorded, usage: { used: result.count, limit,
-    remaining: Math.max(0, limit - result.count), resetsAt: period.end } }
+    remaining: Math.max(0, limit - result.count) } }
 }
 
-/** One log per submitted grading/question request, including failed attempts. */
-export function recordMonthlyAiRequest(premium: boolean, now = Date.now()) {
+/** Record each successful AI response. Requests and failures do not consume usage. */
+export function recordMonthlyAiResponse(premium: boolean, now = Date.now()) {
   return updateUsage(premium, true, now)
 }
 
-export async function getMonthlyAiUsage(premium: boolean, now = Date.now()): Promise<MonthlyAiUsage> {
-  return (await updateUsage(premium, false, now)).usage
+export async function getMonthlyAiUsage(premium: boolean, now = Date.now(), options: { prune?: boolean } = {}): Promise<MonthlyAiUsage> {
+  return (await updateUsage(premium, false, now, options.prune)).usage
 }

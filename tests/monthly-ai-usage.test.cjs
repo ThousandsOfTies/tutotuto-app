@@ -18,7 +18,7 @@ async function usageClient() {
   return { ...exports, ...h }
 }
 
-test('allowances reset at Japan midnight, including December and leap February', async () => {
+test('current-month aggregation uses Japan time, including December and leap February', async () => {
   const api = await usageClient()
   for (const [before, after] of [
     ['2026-10-31T14:59:59.999Z', '2026-10-31T15:00:00.000Z'],
@@ -32,20 +32,34 @@ test('allowances reset at Japan midnight, including December and leap February',
   }
 })
 
-test('free and paid plans share the monthly count, allow 100 and 500 submissions, and start fresh next month', async () => {
+test('free and paid plans count completed responses and clean other months only when a PDF opens', async () => {
   const api = await usageClient(), now = Date.parse('2026-10-22T03:00:00Z')
-  const free = await Promise.all(Array.from({ length: 101 }, () => api.recordMonthlyAiRequest(false, now)))
-  assert.equal(free.filter(result => result.recorded).length, 100)
+  await Promise.all(Array.from({ length: 100 }, () => api.recordMonthlyAiResponse(false, now)))
   assert.equal((await api.getMonthlyAiUsage(false, now)).remaining, 0)
   assert.equal((await api.getMonthlyAiUsage(true, now)).remaining, 400)
-  const premium = await Promise.all(Array.from({ length: 401 }, () => api.recordMonthlyAiRequest(true, now)))
-  assert.equal(premium.filter(result => result.recorded).length, 400)
+  await Promise.all(Array.from({ length: 400 }, () => api.recordMonthlyAiResponse(true, now)))
   assert.equal((await api.getMonthlyAiUsage(true, now)).used, 500)
   assert.equal((await api.getMonthlyAiUsage(false, now)).remaining, 0)
-  const next = await api.getMonthlyAiUsage(false, Date.parse('2026-10-31T15:00:00Z'))
+  const nextMonth = Date.parse('2026-10-31T15:00:00Z')
+  const next = await api.getMonthlyAiUsage(false, nextMonth)
   assert.equal(next.used, 0)
   assert.equal(next.remaining, 100)
-  assert.deepEqual((await api.entry('settings', 'requestUsage:tutotuto.ai')).timestamps, [])
+  assert.equal((await api.entry('settings', 'requestUsage:tutotuto.ai')).timestamps.length, 500)
+  await api.recordMonthlyAiResponse(false, nextMonth)
+  assert.equal((await api.entry('settings', 'requestUsage:tutotuto.ai')).timestamps.length, 501)
+  const opened = await api.getMonthlyAiUsage(false, nextMonth, { prune: true })
+  assert.equal(opened.used, 1)
+  assert.deepEqual((await api.entry('settings', 'requestUsage:tutotuto.ai')).timestamps, [nextMonth])
+})
+
+test('every response already received is counted even when two tabs finish at the allowance boundary', async () => {
+  const api = await usageClient(), now = Date.parse('2026-10-22T03:00:00Z')
+  await Promise.all(Array.from({ length: 99 }, () => api.recordMonthlyAiResponse(false, now)))
+  assert.equal((await api.getMonthlyAiUsage(false, now)).remaining, 1)
+  await Promise.all([api.recordMonthlyAiResponse(false, now), api.recordMonthlyAiResponse(false, now)])
+  const usage = await api.getMonthlyAiUsage(false, now)
+  assert.equal(usage.used, 101)
+  assert.equal(usage.remaining, 0)
 })
 
 test('the real toolbar disables grading and questions when their shared allowance is exhausted', () => {

@@ -766,9 +766,8 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       if (isFollowUpQuestion && parentPanel?.type !== 'grading') {
         throw new Error(appMessages.errors.questionSourceMissing)
       }
-      // Count one submission rather than the number of problems/results. The
-      // transaction checks the latest count again, even if another tab sent first.
-      if (!await aiUsage.record()) throw new Error(appMessages.errors.aiMonthlyLimit)
+      // Check before sending; only a successful AI response consumes usage.
+      if (!await aiUsage.canRequest()) throw new Error(appMessages.errors.aiMonthlyLimit)
       const startTime = Date.now()
       const model = selectedModel !== 'default' ? selectedModel : undefined
       const response = isFollowUpQuestion && parentPanel.type === 'grading'
@@ -783,6 +782,14 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       }
 
       setGradingError(null)
+
+      try {
+        await aiUsage.record()
+      } catch (error) {
+        // Preserve the received answer even if its usage log cannot be saved.
+        console.error(error)
+        setGradingError(appMessages.errors.aiUsageUnavailable)
+      }
 
       const gradingResult = response.result
       if (traceId) {
@@ -1527,7 +1534,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
           <span>{aiUsage.unavailable ? appT('errors.aiUsageUnavailable') : aiUsage.usage
             ? appT('usage.remaining', { remaining: aiUsage.usage.remaining, limit: aiUsage.usage.limit })
             : appT('usage.loading')}</span>
-          <span>{aiUsage.usage?.remaining === 0 ? appT('errors.aiMonthlyLimit') : appT('usage.reset')}</span>
+          <span>{aiUsage.usage?.remaining === 0 ? appT('errors.aiMonthlyLimit') : appT('usage.cleanup')}</span>
         </div>
 
         <div ref={panelNavigationRef} style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>

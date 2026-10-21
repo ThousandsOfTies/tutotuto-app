@@ -53,13 +53,13 @@
     "gradingFailed": "Grading failed",
     "imageTooSmall": "Image too small",
     "imageLoad": "Image load error",
-    "aiMonthlyLimit": "You have reached this month's AI allowance. You can use AI again next month.",
+    "aiMonthlyLimit": "You have reached this month's AI allowance.",
     "aiUsageUnavailable": "Could not check your usage. Check browser storage and try again."
   },
   "usage": {
     "loading": "Checking AI usage…",
     "remaining": "AI this month: {{remaining}} of {{limit}} requests remaining",
-    "reset": "Grading and follow-up questions combined. Resets on the 1st (Japan time)"
+    "cleanup": "Grading and follow-up answers combined. Opening a PDF removes usage logs from other months"
   },
   "answer": {
     "title": "Teacher’s answer",
