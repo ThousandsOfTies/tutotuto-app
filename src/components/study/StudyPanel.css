@@ -18,6 +18,23 @@
   overflow: hidden;
 }
 
+.ai-usage-banner {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 16px;
+  padding: 6px 12px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ai-usage-unavailable {
+  background: #fff7ed;
+  color: #9a3412;
+}
+
 /* ペンボタンに紐付く一度きりの案内。PDFの表示領域は縮めない。 */
 .pen-guidance {
   position: absolute;

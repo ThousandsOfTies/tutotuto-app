@@ -52,7 +52,14 @@
     "questionFailed": "Could not answer the question",
     "gradingFailed": "Grading failed",
     "imageTooSmall": "Image too small",
-    "imageLoad": "Image load error"
+    "imageLoad": "Image load error",
+    "aiMonthlyLimit": "You have reached this month's AI allowance. You can use AI again next month.",
+    "aiUsageUnavailable": "Could not check your usage. Check browser storage and try again."
+  },
+  "usage": {
+    "loading": "Checking AI usage…",
+    "remaining": "AI this month: {{remaining}} of {{limit}} requests remaining",
+    "reset": "Grading and follow-up questions combined. Resets on the 1st (Japan time)"
   },
   "answer": {
     "title": "Teacher’s answer",

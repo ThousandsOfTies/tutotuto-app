@@ -36,6 +36,7 @@ function handler(name, adapters, componentAst = ast) {
         appMessages: require('../src/i18n/locales/ja.json'),
         setTool() {}, studyToolForPanel,
         traceUndo: { busy: false }, deletedStudyNodeIdsRef: { current: new Set() }, handledTracePointerRef: { current: false },
+        gradingInFlight: { current: false }, aiUsage: { record: async () => true, refresh: async () => {} },
         drawStationaryStroke, resizeCanvasForDisplay, getCanvasLogicalSize,
         ...studySelectionAdapters(adapters), ...adapters,
     });
@@ -676,6 +677,39 @@ test('a follow-up asks the tutor without grading or adding grading history', asy
     assert.equal(marker.followUps[0].grading.result.overallComment, 'follow-up');
     assert.equal(marker.followUps[0].grading.result.pageType, 'follow-up-question');
     assert.equal(panels[0].nodeId, 'child');
+});
+
+test('grading and follow-up submissions record before the API, stop at the limit, and retain failed attempts', async () => {
+    for (const followUp of [false, true]) {
+        const events = [], errors = [], inFlight = { current: false };
+        let allow = false;
+        const run = handler('confirmAndGrade', {
+            gradingInFlight: inFlight,
+            aiUsage: {
+                record: async () => { events.push('record'); return allow; },
+                refresh: async () => { events.push('refresh'); },
+            },
+            setIsGrading() {}, setGradingError: value => { if (value) errors.push(value); },
+            panelStack: followUp
+                ? [{ type: 'grading', result: { problems: [] } }, { type: 'answer', source: 'grading' }]
+                : [{ type: 'answer' }],
+            activePanelIndex: followUp ? 1 : 0,
+            compressImageDataUrl: async value => value,
+            Image: class { width = 100; height = 100; set src(_) { queueMicrotask(() => this.onload()); } },
+            selectedModel: 'default', i18n: { language: 'ja' },
+            gradeWork: async () => { events.push('grade'); return { success: false, error: 'network error' }; },
+            askQuestion: async () => { events.push('ask'); return { success: false, error: 'network error' }; },
+            console: { error() {} },
+        });
+        await run('image', [1]);
+        assert.deepEqual(events, ['record', 'refresh']);
+        assert.ok(errors.includes(require('../src/i18n/locales/ja.json').errors.aiMonthlyLimit));
+        assert.equal(inFlight.current, false);
+        allow = true; events.length = 0;
+        await run('image', [1]);
+        assert.deepEqual(events, ['record', followUp ? 'ask' : 'grade', 'refresh']);
+        assert.ok(errors.includes('network error'));
+    }
 });
 
 test('a graded PDF mark opens the saved answer sheet with its grading result in breadcrumbs', async () => {

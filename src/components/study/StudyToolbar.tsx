@@ -19,6 +19,8 @@ interface StudyToolbarProps {
     // Grading
     isSelectionMode: boolean;
     isGrading: boolean;
+    aiDisabled?: boolean;
+    aiDisabledReason?: string;
     startGrading: () => void;
     cancelSelection: () => void;
 
@@ -55,6 +57,8 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
     viewControls,
     isSelectionMode,
     isGrading,
+    aiDisabled = false,
+    aiDisabledReason,
     startGrading,
     cancelSelection,
     isTextMode,
@@ -194,13 +198,13 @@ export const StudyToolbar: React.FC<StudyToolbarProps> = ({
                         )}
                         <button
                             onClick={onGrade}
-                            disabled={isGrading}
+                            disabled={isGrading || aiDisabled}
                             className="btn-submit"
-                            title={submissionKind === 'ask' ? appT('toolbar.ask') : appT('toolbar.grade')}
+                            title={aiDisabled ? aiDisabledReason : submissionKind === 'ask' ? appT('toolbar.ask') : appT('toolbar.grade')}
                             aria-label={submissionKind === 'ask' ? appT('toolbar.ask') : appT('toolbar.grade')}
                             style={{
-                                cursor: isGrading ? 'wait' : 'pointer',
-                                opacity: isGrading ? 0.6 : 1,
+                                cursor: isGrading ? 'wait' : aiDisabled ? 'not-allowed' : 'pointer',
+                                opacity: isGrading || aiDisabled ? 0.6 : 1,
                                 transition: 'all 0.15s',
                             }}
                         >

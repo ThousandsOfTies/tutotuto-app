@@ -34,6 +34,7 @@ import { getPanelWheelDestination } from '@home-teacher/common/utils/panelWheelN
 import './StudyPanel.css'
 import { compressImageDataUrl } from '@home-teacher/common/utils/image'
 import { useAuth } from '@home-teacher/common/contexts/AuthContext'
+import { useMonthlyAiUsage } from '../../usage/useMonthlyAiUsage'
 
 // テキストアノテーションの型定義
 export type TextDirection = 'horizontal' | 'vertical-rl' | 'vertical-lr'
@@ -156,6 +157,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
   const selection = useRectangleSelection(containerRef)
   const { rect: selectionRect, activeRef: isSelectingRef } = selection
   const [isGrading, setIsGrading] = useState(false)
+  const gradingInFlight = useRef(false)
 
   // Tool State
   const [penColor, setPenColor] = useState('#FF0000') // Updated to match bottom block default
@@ -179,6 +181,7 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
   // SNS State
   const [snsLinks, setSnsLinks] = useState<SNSLinkRecord[]>([])
   const { userData } = useAuth()
+  const aiUsage = useMonthlyAiUsage(pdfId, userData?.isPremium)
   const snsTimeLimit = userData?.snsRewardMinutes || 60
 
   useEffect(() => {
@@ -726,7 +729,8 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
 
   // 採点確定ハンドラ
   const confirmAndGrade = async (compositeImage: string, sourcePageNumbers: number[]) => {
-    if (traceUndo.busy) return
+    if (traceUndo.busy || gradingInFlight.current) return
+    gradingInFlight.current = true
     setIsGrading(true)
     setGradingError(null)
     const answerPanel = panelStack[activePanelIndex]
@@ -762,6 +766,9 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       if (isFollowUpQuestion && parentPanel?.type !== 'grading') {
         throw new Error(appMessages.errors.questionSourceMissing)
       }
+      // Count one submission rather than the number of problems/results. The
+      // transaction checks the latest count again, even if another tab sent first.
+      if (!await aiUsage.record()) throw new Error(appMessages.errors.aiMonthlyLimit)
       const startTime = Date.now()
       const model = selectedModel !== 'default' ? selectedModel : undefined
       const response = isFollowUpQuestion && parentPanel.type === 'grading'
@@ -839,7 +846,9 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
       console.error(e)
       setGradingError(e instanceof Error ? e.message : String(e))
     } finally {
+      gradingInFlight.current = false
       setIsGrading(false)
+      void aiUsage.refresh()
     }
   }
 
@@ -1490,6 +1499,8 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
           }))}
           isSelectionMode={isSelectionMode || isGradingCaptureMode}
           isGrading={isGrading}
+          aiDisabled={aiUsage.disabled}
+          aiDisabledReason={aiUsage.unavailable ? appT('errors.aiUsageUnavailable') : aiUsage.usage?.remaining === 0 ? appT('errors.aiMonthlyLimit') : appT('usage.loading')}
           startGrading={startGrading}
           cancelSelection={isGradingCaptureMode ? cancelGradingCapture : handleCancelSelection}
           isTextMode={isTextMode}
@@ -1511,6 +1522,13 @@ const StudyPanel = ({ pdfRecord, pdfId, onBack }: StudyPanelProps) => {
           availableModels={availableModels}
           defaultModelName={defaultModelName}
         />
+
+        <div className={`ai-usage-banner${aiUsage.usage?.remaining === 0 || aiUsage.unavailable ? ' ai-usage-unavailable' : ''}`} role="status">
+          <span>{aiUsage.unavailable ? appT('errors.aiUsageUnavailable') : aiUsage.usage
+            ? appT('usage.remaining', { remaining: aiUsage.usage.remaining, limit: aiUsage.usage.limit })
+            : appT('usage.loading')}</span>
+          <span>{aiUsage.usage?.remaining === 0 ? appT('errors.aiMonthlyLimit') : appT('usage.reset')}</span>
+        </div>
 
         <div ref={panelNavigationRef} style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
           <StudyCanvasControls
