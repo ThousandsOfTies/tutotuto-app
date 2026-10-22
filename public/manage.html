@@ -400,9 +400,8 @@
       const iconElement = document.getElementById('icon');
 
       updateCountdown = () => {
-        // A resumed page may run a visibility event and a delayed timer together.
-        // Expire only once, and replace the pending tick when resynchronizing.
-        if (isTimeUp) return;
+        // Ignore a delayed tick after the session has ended or expired.
+        if (!updateCountdown || isTimeUp) return;
         stopCountdown();
         const now = Date.now();
         const elapsed = now - startTime;
@@ -479,7 +478,7 @@
       if (!notificationsEnabled) return;
       const snsName = document.getElementById('snsName').textContent;
       const notify = async (reminder = false) => {
-        if (notificationInFlight) return;
+        if (notificationInFlight || !updateCountdown) return;
         notificationInFlight = true;
         try {
           const shown = await showBrowserNotification(
@@ -498,6 +497,8 @@
           document.getElementById('warningMessage').textContent = t('pages.manage.notificationUnavailable');
         } finally {
           notificationInFlight = false;
+          // A notification request may finish after the user has returned.
+          if (!updateCountdown) stopWarnings();
         }
       };
       void notify();
@@ -551,20 +552,25 @@
     // 時間切れ状態かどうかを追跡
     let isTimeUp = false;
 
-    document.getElementById('returnToStudy').addEventListener('click', () => {
+    function returnToStudy() {
+      if (!updateCountdown) return;
+      // End the session once, even if visibilitychange and pageshow both fire.
+      updateCountdown = null;
       stopCountdown();
       stopWarnings();
-      updateCountdown = null;
-      window.location.replace(returnUrl || new URL('./', window.location.href).href);
-    });
-
-    // iOS may suspend background timers. Recompute from the original start time
-    // when the page resumes, and leave the warning visible until acknowledged.
-    function refreshCountdown() {
-      if (!document.hidden && updateCountdown) updateCountdown();
+      setTimeout(() => {
+        window.location.replace(returnUrl || new URL('./', window.location.href).href);
+      }, 300);
     }
-    document.addEventListener('visibilitychange', refreshCountdown);
-    window.addEventListener('pageshow', refreshCountdown);
+
+    document.getElementById('returnToStudy').addEventListener('click', returnToStudy);
+
+    // Returning from social media ends social time and reopens the worksheet.
+    function returnWhenVisible() {
+      if (!document.hidden) returnToStudy();
+    }
+    document.addEventListener('visibilitychange', returnWhenVisible);
+    window.addEventListener('pageshow', returnWhenVisible);
 
     console.log('📱 SNS選択画面を表示:', { timeLimitMinutes, snsLinksCount: snsLinks.length });
   </script>

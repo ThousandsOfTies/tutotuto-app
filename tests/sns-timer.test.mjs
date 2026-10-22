@@ -11,11 +11,11 @@ const notificationHelper = fs.readFileSync(new URL('../../home-teacher-common/sr
 const resources = JSON.parse(fs.readFileSync(new URL('../src/i18n/locales/en.json', import.meta.url), 'utf8'));
 const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
 
-async function timerHarness({ notificationEnabled = true, mobile = true, notificationError } = {}) {
+async function timerHarness({ notificationEnabled = true, mobile = true, notificationError, beforeNotification } = {}) {
   let now = 1000000;
   let nextTimerId = 0;
   const timers = new Map(), listeners = new Map(), elements = new Map();
-  const sent = [], navigations = [], vibrations = [], errors = [];
+  const sent = [], navigations = [], vibrations = [], errors = [], closedNotifications = [];
   function element(id) {
     if (!elements.has(id)) {
       const handlers = new Map(), classes = new Set();
@@ -47,8 +47,10 @@ async function timerHarness({ notificationEnabled = true, mobile = true, notific
   }
   const registration = { active: {}, showNotification: async (title, options) => {
     if (notificationError) throw notificationError;
+    await beforeNotification?.();
     sent.push({ title, options });
-  }, getNotifications: async () => [] };
+  }, getNotifications: async () => sent.filter(notification => !closedNotifications.includes(notification))
+    .map(notification => ({ close: () => closedNotifications.push(notification) })) };
   const schedule = (callback, delay, repeat = false) => {
     const id = ++nextTimerId;
     timers.set(id, { callback, due: now + delay, delay, repeat });
@@ -78,7 +80,7 @@ async function timerHarness({ notificationEnabled = true, mobile = true, notific
   vm.runInContext(notificationHelper, context);
   const api = await vm.runInContext(`(async () => { ${script}\nreturn { startCountdownForSNS }; })()`, context);
   await flush();
-  return { sent, navigations, vibrations, errors, document, element, timers,
+  return { sent, navigations, vibrations, errors, closedNotifications, document, element, timers,
     start: () => api.startCountdownForSNS(snsLink),
     async advance(ms) {
       const target = now + ms;
@@ -97,6 +99,7 @@ async function timerHarness({ notificationEnabled = true, mobile = true, notific
     },
     jump: ms => { now += ms; },
     async resume() { document.hidden = false; listeners.get('visibilitychange')?.(); await flush(); },
+    async show() { listeners.get('pageshow')?.(); await flush(); },
     async click(id) { await element(id).handlers.get('click')?.(); await flush(); },
   };
 }
@@ -112,28 +115,78 @@ test('mobile time-up uses the active worker and a valid application-relative ico
   assert.equal(h.element('instruction').style.display, 'block');
 });
 
-test('switching back to the timer does not silently cancel it before the deadline', async () => {
+test('returning from social media before the deadline stops the timer and automatically returns to study', async () => {
   const h = await timerHarness();
   h.start(); h.document.hidden = true;
   h.jump(10000); await h.resume();
-  await h.advance(600);
+  await h.advance(299);
   assert.equal(h.navigations.length, 0);
-  assert.equal(h.element('countdown').textContent, '00:50');
-  h.document.hidden = true;
-  await h.advance(50000);
-  assert.equal(h.sent.length, 1);
+  await h.advance(1);
+  assert.deepEqual(h.navigations, ['./?pdfId=worksheet']);
+  await h.advance(60000);
+  assert.equal(h.sent.length, 0);
+  assert.equal(h.timers.size, 0);
 });
 
-test('resuming after iOS suspended the page shows time-up once and waits for acknowledgement', async () => {
+test('returning after iOS suspended the page ends social time without sending a late warning', async () => {
   const h = await timerHarness();
   h.start(); h.document.hidden = true;
   h.jump(70000); await h.resume();
-  assert.equal(h.element('countdown').textContent, '00:00');
+  await h.show(); await h.resume();
+  await h.advance(300);
+  assert.deepEqual(h.navigations, ['./?pdfId=worksheet']);
+  assert.equal(h.sent.length, 0);
+  assert.equal(h.timers.size, 0);
+});
+
+test('returning after time-up closes notifications and stops every repeating warning', async () => {
+  const h = await timerHarness();
+  h.start(); h.document.hidden = true;
+  await h.advance(66000);
+  assert.equal(h.sent.length, 2);
   assert.equal(h.element('title').textContent, 'Time is up');
-  await h.resume(); await h.resume();
-  assert.equal(h.sent.length, 1);
+  await h.resume(); await h.show();
+  await h.advance(300);
+  assert.deepEqual(h.navigations, ['./?pdfId=worksheet']);
+  assert.equal(h.closedNotifications.length, 2);
+  assert.equal(h.vibrations.at(-1), 0);
+  await h.advance(20000);
+  assert.equal(h.sent.length, 2);
+  assert.equal(h.timers.size, 0);
+});
+
+test('visibility and pageshow leave the social media selection open before a timer starts', async () => {
+  const h = await timerHarness();
+  await h.resume(); await h.show();
+  await h.advance(1000);
   assert.equal(h.navigations.length, 0);
+  assert.equal(h.timers.size, 0);
+});
+
+test('returning to study also closes a notification whose delivery was already in progress', async () => {
+  let finishNotification;
+  const delivery = new Promise(resolve => { finishNotification = resolve; });
+  const h = await timerHarness({ beforeNotification: () => delivery });
+  h.start(); h.document.hidden = true;
+  await h.advance(60000);
+  assert.equal(h.sent.length, 0);
+  await h.resume();
+  finishNotification();
+  await h.advance(300);
+  assert.deepEqual(h.navigations, ['./?pdfId=worksheet']);
+  assert.equal(h.sent.length, 1);
+  assert.equal(h.closedNotifications.length, 1);
+  await h.advance(20000);
+  assert.equal(h.sent.length, 1);
+  assert.equal(h.timers.size, 0);
+});
+
+test('the Return to study button still ends the session if automatic return is not triggered', async () => {
+  const h = await timerHarness();
+  h.start();
+  await h.advance(10000);
   await h.click('returnToStudy');
+  await h.advance(300);
   assert.deepEqual(h.navigations, ['./?pdfId=worksheet']);
   assert.equal(h.timers.size, 0);
 });
