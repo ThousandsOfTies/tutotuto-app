@@ -5,8 +5,9 @@
   "description": "AI-powered drill grading app with handwriting support",
   "type": "module",
   "scripts": {
-    "test:bundle": "node ../home-teacher-common/build/checkDeferredAssets.mjs dist && node scripts/check-page-translations.mjs dist",
-    "test": "npm run test:i18n && npm run test:grading-source && npm run test:api-integration && npm run test:sns-timer",
+    "test:bundle": "node ../home-teacher-common/build/checkDeferredAssets.mjs dist && node scripts/check-page-translations.mjs dist && node scripts/check-starter-material.mjs dist",
+    "test": "npm run test:i18n && npm run test:grading-source && npm run test:api-integration && npm run test:sns-timer && npm run test:starter-material",
+    "test:starter-material": "node --test tests/starter-material.test.cjs",
     "test:sns-timer": "node --test tests/sns-timer.test.mjs tests/notification-events.test.mjs",
     "test:grading-source": "node --test tests/grading-source.test.cjs tests/answer-undo.test.cjs tests/monthly-ai-usage.test.cjs",
     "prepare:server": "node scripts/run-shared-api.mjs prepare:deploy",

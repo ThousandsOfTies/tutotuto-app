@@ -5,6 +5,45 @@
     "studyTab": "Study",
     "description": "An AI study companion for children"
   },
+  "starterMaterial": {
+    "fileName": "Getting started with TutoTuto.pdf",
+    "title": "Getting started with TutoTuto",
+    "subtitle": "Try selecting a problem, writing an answer and getting AI feedback.",
+    "guideTitle": "How to use",
+    "steps": [
+      { "title": "Open the material", "body": "Choose this material from your library." },
+      { "title": "Turn the page", "body": "Use the down arrow on the right to open page 2. The up arrow takes you back." },
+      { "title": "Select a problem", "body": "Use the selection button to enclose the problem and its answer space." },
+      { "title": "Write your answer", "body": "Use handwriting or text in the answer panel." },
+      { "title": "Get AI feedback", "body": "Press Grade, then read the result and explanation." },
+      { "title": "Open social media", "body": "Press View Social Media and choose a configured link." },
+      { "title": "Return to studying", "body": "Check the timer. When time is up, close the social media tab and return." }
+    ],
+    "sections": [
+      { "title": "Calculate.", "items": ["① 1 + 1 =", "② 91 - 19 ="] },
+      { "title": "Write in English.", "items": ["① 私はリンゴが好きです。", "② 彼は背が高いです。"] },
+      { "title": "Write in Japanese.", "items": ["① I go to school.", "② I love cats."] }
+    ],
+    "tryOne": "Try one problem. Select both the question and its answer space.",
+    "network": "AI grading requires an internet connection.",
+    "pageNumber": "{{current}} / {{total}}",
+    "practice": {
+      "title": "A little more practice",
+      "subtitle": "You turned the page. Try some new problems next.",
+      "guideTitle": "Page 2 practice",
+      "steps": [
+        { "title": "Go back and return", "body": "Use the up arrow on the right to go to page 1, then the down arrow to return here." },
+        { "title": "Choose one problem", "body": "Pick a calculation or a translation problem to try." },
+        { "title": "Try AI grading", "body": "Select the question and answer space, write your answer, then press Grade." }
+      ],
+      "sections": [
+        { "title": "Calculate.", "items": ["① 7 + 8 =", "② 32 - 17 ="] },
+        { "title": "Write in English.", "items": ["① 私は犬が好きです。", "② これは私の本です。"] },
+        { "title": "Write in Japanese.", "items": ["① She plays tennis.", "② We study English."] }
+      ],
+      "tryOne": "Get AI feedback on your answer, then try another problem the same way."
+    }
+  },
   "panel": {
     "pdfLoading": "Loading PDF…",
     "pdfFailed": "Could not load the PDF",

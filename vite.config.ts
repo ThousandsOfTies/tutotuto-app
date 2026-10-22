@@ -100,7 +100,7 @@ export default defineConfig(({ mode }) => {
           navigateFallbackDenylist: [/manage\.html/], // <--- manage.htmlをフォールバックから除外
           // version.json はネットワークから最新版を確認するため、precacheしない。
           globIgnores: ['**/opencv*.js', '**/version.json'],
-          globPatterns: ['**/*.{js,css,html,json,png,svg,woff,woff2}'],
+          globPatterns: ['**/*.{js,css,html,json,png,svg,woff,woff2}', 'drills/starter-*-v1.{pdf,jpg}'],
           maximumFileSizeToCacheInBytes: 15 * 1024 * 1024,
           runtimeCaching: [
             {

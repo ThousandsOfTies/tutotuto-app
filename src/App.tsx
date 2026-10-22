@@ -6,16 +6,27 @@ import StudyPanel from './components/study/StudyPanel'
 import PDFEditorPanel from '@home-teacher/common/components/admin/PDFEditorLoader'
 import { PDFFileRecord } from '@home-teacher/common/utils/indexedDB'
 import { useAppInitializer } from '@home-teacher/common/hooks/useAppInitializer'
+import { ensureStarterMaterial } from './services/starterMaterial'
 
 type AppView = 'admin' | 'viewer' | 'editor'
 
 function App() {
-  const { t: appT } = useAppTranslation()
+  const { t: appT, i18n } = useAppTranslation()
   const [currentView, setCurrentView] = useState<AppView>('admin')
   const [selectedPDF, setSelectedPDF] = useState<PDFFileRecord | null>(null)
+  const [starterMaterialReady, setStarterMaterialReady] = useState(false)
 
   // Initialization Hook
   const { isInitialized, initialView, initialPDF, settingsVersion } = useAppInitializer()
+
+  useEffect(() => {
+    if (!isInitialized) return
+    let active = true
+    void ensureStarterMaterial(i18n.resolvedLanguage || i18n.language, appT('starterMaterial.fileName'))
+      .catch(error => console.warn('Starter material initialization skipped:', error))
+      .finally(() => { if (active) setStarterMaterialReady(true) })
+    return () => { active = false }
+  }, [isInitialized, i18n, appT])
 
   // 公開済みのversion.jsonとビルド時のコミットIDを比較し、長時間開いたままの
   // クライアントにも明示的な更新を促す。
@@ -115,7 +126,7 @@ function App() {
     updateServiceWorker(true)
   }
 
-  if (!isInitialized) {
+  if (!isInitialized || !starterMaterialReady) {
     return <div className="loading-screen" style={{
       display: 'flex',
       justifyContent: 'center',
