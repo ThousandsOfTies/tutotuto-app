@@ -5,6 +5,14 @@
     "studyTab": "Study",
     "description": "An AI study companion for children"
   },
+  "onboarding": {
+    "title": "Choose your language to start",
+    "description": "We will add a starter worksheet in your chosen language to your library.",
+    "japanese": "日本語",
+    "english": "English",
+    "note": "You can change the app language later. Your worksheet will keep its original language.",
+    "preparing": "Preparing your worksheet…"
+  },
   "starterMaterial": {
     "fileName": "Getting started with TutoTuto.pdf",
     "title": "Getting started with TutoTuto",

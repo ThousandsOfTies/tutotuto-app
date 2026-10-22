@@ -73,7 +73,11 @@ async function fixture(t) {
         return { DB_NAME: 'TutoTutoDB', getAppSettings: async () => settings }
       },
     })
-    return language => exports.ensureStarterMaterial(language, resources[language.startsWith('ja') ? 'ja' : 'en'].fileName)
+    return Object.assign(language => exports.ensureStarterMaterial(language,
+      resources[language.startsWith('ja') ? 'ja' : 'en'].fileName), {
+      setup: exports.getStarterMaterialSetup,
+      saveLanguage: exports.saveStarterLanguage,
+    })
   }
   return { entries, calls, client, settings, fetchAsset }
 }
@@ -89,6 +93,50 @@ test('a fresh library gets the localized PDF and offline thumbnail without chang
     assert.ok(h.calls.every(url => url.startsWith(`/TutoTuto/drills/starter-${language}-v1.`)))
     assert.deepEqual((await h.entries('settings')).find(item => item.id === 'app-settings'), h.settings)
   }
+})
+
+test('fresh setup waits for an explicit language choice before fetching a worksheet', async t => {
+  const h = await fixture(t), client = h.client()
+  assert.equal((await client.setup()).status, 'choose-language')
+  assert.equal(h.calls.length, 0)
+  assert.equal((await h.entries('pdfFiles')).length, 0)
+  await client.saveLanguage('en')
+  const setup = await h.client().setup()
+  assert.equal(setup.status, 'ready')
+  assert.equal(setup.language, 'en')
+  assert.equal(h.calls.length, 0)
+  await client(setup.language)
+  const [record] = await h.entries('pdfFiles')
+  assert.equal(record.fileName, resources.en.fileName)
+  assert.ok(h.calls.every(url => url.includes('starter-en-v1.')))
+  assert.equal((await h.client().setup()).status, 'done')
+})
+
+test('a failed download retains the chosen language for the next launch', async t => {
+  const h = await fixture(t), client = h.client(() => new Response('offline', { status: 503 }))
+  await client.saveLanguage('ja')
+  await assert.rejects(client('ja'), /Starter material download failed/)
+  const setup = await h.client().setup()
+  assert.equal(setup.status, 'ready')
+  assert.equal(setup.language, 'ja')
+  assert.equal((await h.entries('pdfFiles')).length, 0)
+  await h.client()(setup.language)
+  assert.equal((await h.client().setup()).status, 'done')
+})
+
+test('existing libraries and deleted starter worksheets do not trigger language selection', async t => {
+  const existing = await fixture(t)
+  await existing.entries('pdfFiles', store => store.add({ id: 'existing', fileName: 'Book.pdf', drawings: {} }))
+  assert.equal((await existing.client().setup()).status, 'done')
+  await existing.entries('pdfFiles', store => store.delete('existing'))
+  assert.equal((await existing.client().setup()).status, 'done')
+  assert.equal(existing.calls.length, 0)
+
+  const installed = await fixture(t)
+  await installed.client()('ja')
+  const [record] = await installed.entries('pdfFiles')
+  await installed.entries('pdfFiles', store => store.delete(record.id))
+  assert.equal((await installed.client().setup()).status, 'done')
 })
 
 test('reloads and language changes keep the saved content, drawings and name; deleting it is permanent', async t => {

@@ -5,6 +5,14 @@
     "studyTab": "Study",
     "description": "子供向け学習支援アプリ"
   },
+  "onboarding": {
+    "title": "言語を選んで始めましょう",
+    "description": "選んだ言語の入門教材を、教材一覧に追加します。",
+    "japanese": "日本語",
+    "english": "English",
+    "note": "画面の言語はあとから変更できます。教材の言語はそのまま残ります。",
+    "preparing": "教材を準備しています…"
+  },
   "starterMaterial": {
     "fileName": "はじめてのTutoTuto.pdf",
     "title": "はじめてのTutoTuto",

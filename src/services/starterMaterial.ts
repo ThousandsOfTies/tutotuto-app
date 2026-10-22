@@ -2,6 +2,10 @@ import { DB_NAME, getAppSettings, type PDFFileRecord } from '@home-teacher/commo
 
 const STATE_ID = 'tutotuto:starter-material:v1'
 const PDF_ID = 'tutotuto-starter-v1'
+const LANGUAGE_ID = 'tutotuto:starter-language:v1'
+export type StarterLanguage = 'ja' | 'en'
+export type StarterMaterialSetup = { status: 'done' } | { status: 'choose-language' }
+  | { status: 'ready'; language: StarterLanguage }
 let initialization: Promise<void> | undefined
 
 async function openDatabase(): Promise<IDBDatabase> {
@@ -52,6 +56,39 @@ function imageDataURL(blob: Blob): Promise<string> {
     reader.onerror = () => reject(reader.error)
     reader.readAsDataURL(blob)
   })
+}
+
+export async function getStarterMaterialSetup(): Promise<StarterMaterialSetup> {
+  const db = await openDatabase()
+  try {
+    if (await registerIfEmpty(db) === 'done') return { status: 'done' }
+    return await new Promise<StarterMaterialSetup>((resolve, reject) => {
+      const transaction = db.transaction(['settings'], 'readonly')
+      const request = transaction.objectStore('settings').get(LANGUAGE_ID)
+      transaction.oncomplete = () => {
+        const language = request.result?.language
+        resolve(language === 'ja' || language === 'en'
+          ? { status: 'ready', language } : { status: 'choose-language' })
+      }
+      transaction.onerror = transaction.onabort = () => reject(transaction.error)
+    })
+  } finally {
+    db.close()
+  }
+}
+
+export async function saveStarterLanguage(language: StarterLanguage): Promise<void> {
+  const db = await openDatabase()
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(['settings'], 'readwrite')
+      transaction.objectStore('settings').put({ id: LANGUAGE_ID, language })
+      transaction.oncomplete = () => resolve()
+      transaction.onerror = transaction.onabort = () => reject(transaction.error)
+    })
+  } finally {
+    db.close()
+  }
 }
 
 async function installStarterMaterial(language: string, fileName: string): Promise<void> {

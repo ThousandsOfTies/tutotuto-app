@@ -6,7 +6,8 @@ import StudyPanel from './components/study/StudyPanel'
 import PDFEditorPanel from '@home-teacher/common/components/admin/PDFEditorLoader'
 import { PDFFileRecord } from '@home-teacher/common/utils/indexedDB'
 import { useAppInitializer } from '@home-teacher/common/hooks/useAppInitializer'
-import { ensureStarterMaterial } from './services/starterMaterial'
+import { ensureStarterMaterial, getStarterMaterialSetup, saveStarterLanguage, type StarterLanguage } from './services/starterMaterial'
+import { StarterLanguageChoice } from './components/setup/StarterLanguageChoice'
 
 type AppView = 'admin' | 'viewer' | 'editor'
 
@@ -15,6 +16,8 @@ function App() {
   const [currentView, setCurrentView] = useState<AppView>('admin')
   const [selectedPDF, setSelectedPDF] = useState<PDFFileRecord | null>(null)
   const [starterMaterialReady, setStarterMaterialReady] = useState(false)
+  const [needsStarterLanguage, setNeedsStarterLanguage] = useState(false)
+  const [choosingStarterLanguage, setChoosingStarterLanguage] = useState(false)
 
   // Initialization Hook
   const { isInitialized, initialView, initialPDF, settingsVersion } = useAppInitializer()
@@ -22,11 +25,45 @@ function App() {
   useEffect(() => {
     if (!isInitialized) return
     let active = true
-    void ensureStarterMaterial(i18n.resolvedLanguage || i18n.language, appT('starterMaterial.fileName'))
-      .catch(error => console.warn('Starter material initialization skipped:', error))
-      .finally(() => { if (active) setStarterMaterialReady(true) })
+    const initializeStarterMaterial = async () => {
+      const setup = await getStarterMaterialSetup()
+      if (!active) return
+      if (setup.status === 'choose-language') {
+        setNeedsStarterLanguage(true)
+        return
+      }
+      if (setup.status === 'ready') {
+        await ensureStarterMaterial(setup.language,
+          i18n.t('starterMaterial.fileName', { ns: 'tutotuto', lng: setup.language }))
+      }
+      if (active) setStarterMaterialReady(true)
+    }
+    void initializeStarterMaterial()
+      .catch(error => {
+        console.warn('Starter material initialization skipped:', error)
+        if (active) setStarterMaterialReady(true)
+      })
     return () => { active = false }
-  }, [isInitialized, i18n, appT])
+  }, [isInitialized, i18n])
+
+  const handleStarterLanguage = async (language: StarterLanguage) => {
+    if (choosingStarterLanguage) return
+    setChoosingStarterLanguage(true)
+    try {
+      await saveStarterLanguage(language)
+      await i18n.changeLanguage(language)
+      try { localStorage.setItem('language', language) }
+      catch (error) { console.warn('Language preference could not be saved:', error) }
+      await ensureStarterMaterial(language,
+        i18n.t('starterMaterial.fileName', { ns: 'tutotuto', lng: language }))
+    } catch (error) {
+      console.warn('Starter material initialization skipped:', error)
+    } finally {
+      setStarterMaterialReady(true)
+      setNeedsStarterLanguage(false)
+      setChoosingStarterLanguage(false)
+    }
+  }
 
   // 公開済みのversion.jsonとビルド時のコミットIDを比較し、長時間開いたままの
   // クライアントにも明示的な更新を促す。
@@ -127,6 +164,9 @@ function App() {
   }
 
   if (!isInitialized || !starterMaterialReady) {
+    if (isInitialized && needsStarterLanguage) {
+      return <StarterLanguageChoice onSelect={handleStarterLanguage} busy={choosingStarterLanguage} />
+    }
     return <div className="loading-screen" style={{
       display: 'flex',
       justifyContent: 'center',
